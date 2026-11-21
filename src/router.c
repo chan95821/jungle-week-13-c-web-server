@@ -25,6 +25,7 @@ static const HttpStatusEntry ERROR_STATUS_TABLE[] = {
     { HTTP_STATUS_LENGTH_REQUIRED,            "Length Required",            "411 Length Required\n" },
     { HTTP_STATUS_PAYLOAD_TOO_LARGE,          "Payload Too Large",          "413 Payload Too Large\n" },
     { HTTP_STATUS_URI_TOO_LONG,               "URI Too Long",               "414 URI Too Long\n" },
+    { HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE, "Request Header Fields Too Large", "431 Request Header Fields Too Large\n" },
     { HTTP_STATUS_NOT_IMPLEMENTED,            "Not Implemented",            "501 Not Implemented\n" },
     { HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED, "HTTP Version Not Supported", "505 HTTP Version Not Supported\n" },
 };

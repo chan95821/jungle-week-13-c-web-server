@@ -60,7 +60,7 @@ TCP 바이트 스트림에서 HTTP/1.1 요청 라인·헤더·본문 경계를 �
 
 ### D. 오류 처리 및 상태 코드 정책
 - **응답 없이 즉시 연결 종료**:
-  - 헤더 수신 중 `8192B` 상한 초과, `\r\n\r\n` 도달 전 조기 `EOF`, 네트워크 오류, 본문 수신 중 조기 `EOF` *(Iteration 1 회귀 기준 유지)*
+  - `\r\n\r\n` 도달 전 조기 `EOF`, 네트워크 오류, 본문 수신 중 조기 `EOF`
 - **HTTP 오류 응답 반환 후 `Connection: close` 종료**:
   - 상태 코드별 `(status, reason, body)` 매핑 테이블로 분리 보관하며, `Content-Type: text/plain`과 짧은 설명 본문(예: `"404 Not Found\n"`)을 함께 반환한다. (RFC 9110 권장)
   - `400 Bad Request`: 잘못된 요청 라인/헤더 문법, HTTP/1.1 `Host` 누락, 잘못된/중복 `Content-Length`, `Host`/`Content-Type` 상한 초과·중복, `Transfer-Encoding` + `Content-Length` 동시 존재
@@ -69,6 +69,7 @@ TCP 바이트 스트림에서 HTTP/1.1 요청 라인·헤더·본문 경계를 �
   - `411 Length Required`: `POST` 요청에 `Content-Length` 헤더가 누락된 경우
   - `413 Payload Too Large`: `Content-Length`가 `REQ_BODY_MAX_BYTES` 초과
   - `414 URI Too Long`: `URI` 길이가 `REQ_URI_MAX_BYTES` 초과
+  - `431 Request Header Fields Too Large`: 요청 헤드 전체가 `REQ_HEADER_MAX_BYTES` (`8192B`) 초과
   - `501 Not Implemented`: `Transfer-Encoding: chunked` 등 미지원 전송 인코딩
   - `505 HTTP Version Not Supported`: `HTTP/1.1`, `HTTP/1.0` 외의 버전 (예: `HTTP/2.0`)
 

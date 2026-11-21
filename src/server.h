@@ -35,9 +35,10 @@ typedef enum {
     HTTP_STATUS_NOT_FOUND                  = 404,
     HTTP_STATUS_METHOD_NOT_ALLOWED         = 405,
     HTTP_STATUS_LENGTH_REQUIRED            = 411,
-    HTTP_STATUS_PAYLOAD_TOO_LARGE          = 413,
-    HTTP_STATUS_URI_TOO_LONG               = 414,
-    HTTP_STATUS_INTERNAL_SERVER_ERROR      = 500,
+    HTTP_STATUS_PAYLOAD_TOO_LARGE            = 413,
+    HTTP_STATUS_URI_TOO_LONG                 = 414,
+    HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE = 431,
+    HTTP_STATUS_INTERNAL_SERVER_ERROR        = 500,
     HTTP_STATUS_NOT_IMPLEMENTED            = 501,
     HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED = 505
 } HttpStatus;
@@ -60,7 +61,7 @@ int  send_all(int fd, const void *buf, size_t len);
 /* 단일 클라이언트 연결의 요청 수신·디스패치·응답 송신·자원 해제를 조율한다. */
 void handle_client(int connfd);
 
-/* \r\n\r\n까지 수신하고 헤더 끝(out_header_len)과 총 수신량(out_total_len)을 분리한다. */
+/* \r\n\r\n까지 수신하고 헤더 끝(out_header_len)과 총 수신량(out_total_len)을 분리한다. (상한 초과 -2, 오류/EOF -1) */
 int recv_until_header_end(int fd, char *buf, size_t cap,
                           size_t *out_header_len, size_t *out_total_len);
 /* 헤더 직후 이미 도착한 excess를 복사한 뒤 남은 content_length만큼 수신한다. (호출자가 free) */

@@ -140,7 +140,7 @@ int recv_until_header_end(int fd, char *buf, size_t cap,
         }
     }
 
-    return -1;
+    return -2;
 }
 
 int recv_body(int fd, const char *excess, size_t excess_len,
@@ -198,8 +198,12 @@ int recv_http_request(int connfd, HttpRequest *req, HttpStatus *http_status) {
     }
     *http_status = HTTP_STATUS_NONE;
 
-    if (recv_until_header_end(connfd, head_buf, sizeof(head_buf),
-                              &header_len, &total_len) < 0) {
+    int rc = recv_until_header_end(connfd, head_buf, sizeof(head_buf),
+                                   &header_len, &total_len);
+    if (rc < 0) {
+        if (rc == -2) {
+            *http_status = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
+        }
         return -1;
     }
 

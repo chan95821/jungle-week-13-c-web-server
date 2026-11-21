@@ -49,6 +49,16 @@ def start_server(port: int) -> subprocess.Popen:
     return proc
 
 
+def recv_all(sock: socket.socket) -> bytes:
+    chunks = []
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def stop_server(proc: subprocess.Popen) -> int:
     proc.send_signal(signal.SIGINT)
     return proc.wait(timeout=3.0)
@@ -91,7 +101,7 @@ def main() -> int:
             s.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r")
             time.sleep(0.05)
             s.sendall(b"\n")
-            data = s.recv(4096)
+            data = recv_all(s)
             assert data == EXPECTED_RESP, f"Split request mismatch: {data!r}"
         print("[PASS] split packet request")
 
@@ -100,11 +110,11 @@ def main() -> int:
             s.sendall(b"GET / HTTP/1.1\r\n")
         with socket.create_connection(("127.0.0.1", port), timeout=2.0) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
-            s.sendall(b"GET / HTTP/1.1\r\n\r\n")
+            s.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         # 직후 정상 요청으로 서버 생존 확인
         with socket.create_connection(("127.0.0.1", port), timeout=2.0) as s:
-            s.sendall(b"GET / HTTP/1.1\r\n\r\n")
-            assert s.recv(4096) == EXPECTED_RESP
+            s.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            assert recv_all(s) == EXPECTED_RESP
         print("[PASS] early EOF & SIGPIPE resilience")
 
         # 6. 8192B 상한 초과 요청 거부 후 서버 생존 확인
@@ -112,12 +122,14 @@ def main() -> int:
             s.sendall(b"A" * 9000)
             try:
                 resp = s.recv(4096)
-                assert resp == b"", f"Expected empty close on oversized header, got {resp!r}"
+                assert resp == b"" or resp.startswith(b"HTTP/1.1 431 "), (
+                    f"Expected empty close or 431 on oversized header, got {resp!r}"
+                )
             except ConnectionResetError:
                 pass  # 서버가 미수신 바이트 남긴 채 close() 시 TCP RST 정상 발생
         with socket.create_connection(("127.0.0.1", port), timeout=2.0) as s:
-            s.sendall(b"GET / HTTP/1.1\r\n\r\n")
-            assert s.recv(4096) == EXPECTED_RESP
+            s.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            assert recv_all(s) == EXPECTED_RESP
         print("[PASS] oversized header rejection & recovery")
 
         # 7. 이미 사용 중인 포트 bind 실패 확인
@@ -133,8 +145,8 @@ def main() -> int:
     proc2 = start_server(port)
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=2.0) as s:
-            s.sendall(b"GET / HTTP/1.1\r\n\r\n")
-            assert s.recv(4096) == EXPECTED_RESP
+            s.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            assert recv_all(s) == EXPECTED_RESP
     finally:
         assert stop_server(proc2) == 0
     print("[PASS] SO_REUSEADDR immediate restart")

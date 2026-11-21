@@ -189,10 +189,19 @@ def main() -> int:
             s.sendall(b"GET /hello HTTP/1.1\r\nHost: a\r\n\r\n")
         with socket.create_connection(("127.0.0.1", port), timeout=2.0) as s:
             s.sendall(b"A" * 9000)
+            chunks = []
             try:
-                assert s.recv(4096) == b""
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
             except ConnectionResetError:
-                pass
+                pass  # 서버가 미수신 바이트 남긴 채 close() 시 후속 recv에서 TCP RST 발생 가능
+            resp = b"".join(chunks)
+            assert resp.startswith(b"HTTP/1.1 431 Request Header Fields Too Large\r\n"), (
+                f"Expected 431 on oversized header, got {resp!r}"
+            )
         assert send_raw(port, b"GET /hello HTTP/1.1\r\nHost: a\r\n\r\n") == EXPECTED_HELLO
         print("[PASS] early EOF, SIGPIPE, and 8192B header limit resilience")
 

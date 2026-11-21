@@ -217,7 +217,7 @@ static void test_over_limit(void) {
         _exit(0);
     }
     close(sv[1]);
-    assert(recv_until_header_end(sv[0], buf, sizeof(buf), &header_len, &total_len) == -1);
+    assert(recv_until_header_end(sv[0], buf, sizeof(buf), &header_len, &total_len) == -2);
     close(sv[0]);
     waitpid(pid, NULL, 0);
 }
