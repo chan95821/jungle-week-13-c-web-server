@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,8 @@ int open_listenfd(uint16_t port) {
     }
 
     int opt = 1;
+    /* 서버 재시작 시 이전 연결 상태 때문에 주소 재사용이 막히는 상황을 줄인다.
+     * 같은 주소/포트에서 실행 중인 다른 서버와 포트를 공유하는 옵션은 아니다. */
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         perror("setsockopt");
         close(fd);
@@ -60,6 +63,9 @@ int open_listenfd(uint16_t port) {
     }
 
     struct sockaddr_in addr;
+    /* 사용하지 않는 영역도 0으로 초기화한다. INADDR_ANY는 모든 로컬 IPv4
+     * 인터페이스다. htons/htonl은 host 정수를 네트워크 바이트 순서로 바꾼다.
+     * 연결 이후 HTTP 바이트 순서는 TCP가 보존하고, 메시지 경계는 서버가 찾는다. */
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -73,6 +79,15 @@ int open_listenfd(uint16_t port) {
 
     if (listen(fd, LISTEN_BACKLOG) < 0) {
         perror("listen");
+        close(fd);
+        return -1;
+    }
+
+    /* poll 직후 연결이 취소되어도 accept가 무한 대기하지 않도록 리스너만
+     * non-blocking으로 둔다. 클라이언트 송수신은 blocking으로 처리한다. */
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        perror("fcntl(listener)");
         close(fd);
         return -1;
     }
@@ -224,6 +239,9 @@ void handle_client(int connfd) {
     struct http_request request = {0};
     struct http_response response;
     struct timeval timeout = { IO_TIMEOUT_SECONDS, 0 };
+    /* accept된 소켓의 플래그 상속은 OS별로 달라 명시적으로 blocking을 설정한다. */
+    int flags = fcntl(connfd, F_GETFL, 0);
+    if (flags < 0 || fcntl(connfd, F_SETFL, flags & ~O_NONBLOCK) < 0) return;
     if (setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0 ||
         setsockopt(connfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
         perror("setsockopt(client timeout)");

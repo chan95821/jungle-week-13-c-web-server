@@ -14,7 +14,8 @@ int recv_until_header_end(int fd, char *buf, size_t cap, size_t *out_len);
 int recv_request_headers(int fd, char *buf, size_t cap,
                          size_t *out_len, size_t *out_header_len);
 /* request의 메타데이터는 파싱 완료 상태여야 한다. initial은 이미 받은 본문.
- * 성공 0, 실패 HTTP 상태 코드. 할당된 body는 실패해도 호출자가 free한다. */
+ * 성공 0, 실패 HTTP 상태 코드, 시그널 중단 -1.
+ * 할당된 body는 실패해도 호출자가 free한다. */
 int recv_request_body(int fd, struct http_request *request,
                       const void *initial, size_t initial_length);
 int send_all(int fd, const void *buf, size_t len);
