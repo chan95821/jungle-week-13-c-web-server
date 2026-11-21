@@ -55,3 +55,10 @@ dkms.conf
 *.dwo
 
 /webserver
+/server
+/test_parse_port
+/test_recv_header
+/test_send_all
+/test_http_parser
+__pycache__/
+/build/

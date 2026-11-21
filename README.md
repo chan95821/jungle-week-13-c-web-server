@@ -1,52 +1,80 @@
 # jungle-week-13-c-web-server
 
-## 빌드·실행
+C/POSIX HTTP 서버의 개인 Iteration 2 구현이다. 팀 공통 범위는 docs/DEVELOPMENT_CONTEXT.md와 Issue #2, 개인 선택은 PLAN.md 및 docs/iteration-2/Snoopykid/를 참고한다.
 
-Ubuntu WSL2 셸에서 프로젝트 폴더로 이동한다.
+## 실행
+
+Ubuntu WSL2 셸:
 
 ```sh
 cd /mnt/c/Users/David/SW-AI-W02-03-TEMPLATE/jungle-week-13-c-web-server
 make
-./webserver 8080
+./build/server 8080
 ```
 
-Makefile은 C11, -Wall -Wextra -Wpedantic, -g, -O0를 사용한다. 포트는 숫자로 된 1~65535의 필수 CLI 인자다. 다른 포트도 지정할 수 있다.
+서버는 시작 로그 없이 연결을 기다린다. 다른 터미널에서 수동 확인할 수 있다.
 
-서버는 모든 IPv4 로컬 주소인 0.0.0.0에 바인딩한다. 이번 검증은 로컬만 대상으로 하며 외부 PC 접근·방화벽 변경은 포함하지 않는다.
+```sh
+curl --noproxy '*' -i http://127.0.0.1:8080/hello
+curl --noproxy '*' -i --data-binary 'hello' http://127.0.0.1:8080/echo
+```
 
-## 현재 동작
+GET /와 /hello는 text/plain 및 줄바꿈 없는 Hello 5바이트다. POST /echo는 입력 바이트 그대로, application/octet-stream과 실제 본문 길이로 응답한다. 종료는 서버 터미널의 Ctrl+C다. 이 명령들은 사용 안내이며 이 작업에서 서버·curl을 실행했다는 뜻은 아니다.
 
-- socket → SO_REUSEADDR·호출별 타임아웃 설정 → bind → listen → accept.
-- 블로킹·순차 처리. 각 연결은 handle_connection에서 처리하고 main에서 한 번 닫는다.
-- 요청 줄·헤더·CRLFCRLF를 합쳐 최대 8192바이트까지 받는다. recv 한 번이 요청 하나라고 가정하지 않는다.
-- 제한 안에서 헤더가 끝나면 HTTP/1.1 200 OK와 Hello, world! 및 LF 줄바꿈을 전송한다. 본문은 14바이트이며 Content-Length도 14다.
-- Content-Type: text/plain; charset=utf-8, Connection: close. 응답을 전송한 뒤 연결을 닫는다.
-- 헤더가 제한 안에 끝나지 않으면 431 응답을 시도하고 종료한다. 메서드·URI·버전·헤더 의미와 POST 본문 파싱은 아직 구현하지 않았다.
-- 정상 사용 범위는 본문 없는 요청이다. 읽지 않은 추가 데이터가 남은 연결은 close 시 TCP reset으로 응답이 잘릴 수 있으며 431 응답도 검증 대상이다.
-- send는 반환된 길이만큼 진행하며 나머지를 반복해서 보낸다. SIGPIPE는 무시하되 송신 오류는 확인한다.
-- SIGINT·SIGTERM 핸들러는 종료 표시만 남긴다. main 흐름에서 연결과 리스너를 정리하며 응답 완료는 보장하지 않는다.
+## 이번 지원 범위
 
-## 임시값과 제한
+- IPv4 0.0.0.0, 블로킹 순차 처리, 연결당 요청 하나, Connection: close.
+- HTTP/1.1 origin-form만 지원하는 제한 구현이다. 완전한 HTTP/1.1 구현이 아니다. absolute-form은 거부하고 chunked/Transfer-Encoding 요청도 거부한다.
+- 첫 물음표 앞 원래 경로로 라우팅한다. 유효한 percent escape 구문은 검사하지만 디코딩·정규화하지 않는다. 정적 파일 설계 전 루트 밖 접근 방지와 함께 재검토한다.
+- 헤더 이름 대소문자·OWS 처리, 유효한 단일 Host, 엄격한 Content-Length, Connection·Expect를 해석한다. 유효한 일반 미지원 필드는 의미 처리 없이 건너뛴다.
+- 길이 정보 없음은 본문 0. 같은 값의 중복 길이·쉼표 목록·충돌 정보도 거절한다. 바이너리 본문 경계는 선언 길이로 정하며 내용으로 추측하지 않는다.
+- 요청 타입 반영, JSON 파싱·압축 해제, keep-alive, 다음 요청 처리는 제외한다.
+- HEAD는 지원하지 않아 501로 거부하되 HEAD 응답에는 본문을 보내지 않는다. 이를 HEAD 기능 지원으로 표시하지 않는다.
 
-server.c 위쪽 한 곳에서 관리한다.
+## 임시 상수와 소유권
 
-| 상수 | 임시값 | 의미 |
-|---|---:|---|
-| HEADER_LIMIT_BYTES | 8192 | 요청 줄·헤더·끝 경계의 합. 본문 제한 아님. |
-| LISTEN_BACKLOG | 128 | 연결 대기 큐 요청값. OS 제한의 영향을 받으며 동시 처리 능력 아님. |
-| IO_TIMEOUT_SECONDS | 5 | 수신·송신 호출별 제한. 전체 요청·응답 완료 기한 아님. |
+| 위치 | 상수 | 임시값 |
+|---|---|---:|
+| src/http.h | REQ_HEADER_MAX_BYTES | 요청 줄·헤더·CRLFCRLF 합계 8192바이트 |
+| src/http.h | REQ_BODY_MAX_BYTES | 본문 65,536바이트 |
+| src/server.h | LISTEN_BACKLOG | 128 |
+| src/server.h | IO_CALL_TIMEOUT_SECONDS | 수신·송신 호출별 5초 |
+| src/server.h | HEADER_DEADLINE_SECONDS | accept 이후 헤더 전체 7초 |
+| src/server.h | BODY_DEADLINE_SECONDS | 헤더 완료 이후 본문 전체 15초 |
+| src/server.h | DRAIN_DEADLINE_SECONDS | 정상 응답 후 폐기 전체 1초 |
+| src/server.h | DRAIN_MAX_BYTES | 응답 뒤 추가 수신 폐기 65,536바이트 |
 
-리스닝 소켓에도 동일한 타임아웃을 설정해 신호 검사 직후 accept를 시작하는 경우에도 무기한 대기가 남지 않도록 했다. 호출이 신호로 중단되면 종료 표시를 확인하며, 표시가 없으면 재시도한다.
+숫자는 표준·최적값이 아닌 초기 정책이다. 본문은 유효 길이만큼 한 번 할당하고, 0이면 할당하지 않는다. 연결 처리 함수가 본문과 헤더를 소유하며 하위 함수는 빌려 사용한다. FD 최종 close는 main, 본문 free는 handle_client의 cleanup 한 곳이다.
 
-조금씩 계속 보내는 클라이언트는 현재 호출별 제한을 피하며 서버를 오래 점유할 수 있다. 전체 헤더 기한, keep-alive, 동적 버퍼, 동시성 모델은 추후 별도 결정한다. 최종 동시성 모델을 전제로 전역 연결 상태를 만들지 않는다.
+수신은 호출별 제한과 전체 기한의 남은 시간 중 짧은 쪽을 사용한다. 전체 기한은 조금씩 수신하거나 EINTR가 발생해도 갱신하지 않는다. 전체 응답 송신 완료 기한은 별도로 도입하지 않았다.
 
-## 학습 연결
+응답 송신 후 shutdown(SHUT_WR), 제한적 폐기, close 순서다. 순차 서버는 폐기 대기 중 다음 연결을 처리하지 못하며, 상한에 도달해 닫는 경우 응답 전달을 보장하지 않는다. 서버 종료 신호 때에는 폐기 완료나 진행 중 응답 완료를 기다리지 않는다. accept의 신호 경합으로 무기한 대기가 남지 않도록 리스닝 소켓에도 호출별 수신 제한을 설정했다.
 
-CSAPP 11장의 listening descriptor는 새 연결을 받는 listener이고, connected descriptor는 accept가 돌려주는 client다. 수신·송신·close는 연결용 descriptor에 수행한다. TCP가 바이트 스트림을 제공하므로 HTTP 경계 확인과 부분 I/O 반복은 애플리케이션 책임이다.
+## 검증 상태와 명령
 
-## 진행 자료
+- 서버: 현재 Makefile의 -std=c11 -Wall -Wextra -Werror -O2로 컴파일 성공.
+- 네 개 단위 테스트 바이너리: -fsanitize=address,undefined로 컴파일 성공. 실행하지 않았으므로 sanitizer 검사 통과를 의미하지 않는다.
+- 두 E2E 스크립트: Python 구문 컴파일 성공. 실행하지 않았다.
+- 공식 검증·성능 측정·비교 실험: 사용자 범위 확정/허락 전이며 미실행이다.
 
-- PLAN.md: 전체 계획, 결정 기록, 구현·검증 상태.
-- VERIFICATION.md: Iteration 1 공식 검증 제안과 포함·제외 범위. 아직 실행 전.
-- EXPERIMENTS.md: 추후 버퍼·backlog·타임아웃·빌드·동시성 비교 목록. 지금 구현·실행하지 않음.
-- AGENTS.md: 사용자 선택 및 검증·성능 측정 절차.
+허락 후 사용할 후보 명령:
+
+```sh
+make test
+make verify
+```
+
+make test는 기존 세 단위 테스트와 test_http_parser를 실행한다. make verify는 갱신한 1단계 E2E와 기본 2단계 E2E를 실행한다. 기본 E2E에는 시간 기한·폐기 상한·할당 실패 주입의 모든 분기가 포함되지 않으므로 전체 완료 증거로 확대하지 않는다. 해당 기본 기능 검증 방법은 별도 범위 검토가 필요하다. 광범위한 조합·퍼징·장시간/경합 회귀는 6단계에서 확대한다. 성능 계측·부하는 별도 허락 대상이다.
+
+## 설명과 기록
+
+- docs/iteration-2/Snoopykid/iteration-2-walkthrough.md: main부터 대화의 결정과 연결한 코드 흐름.
+- docs/iteration-2/Snoopykid/iteration-2-requirements.md: 최소 범위·표준·선택 기록.
+- docs/iteration-2/Snoopykid/iteration-2-tests.md: 기본 성공·실패 후보와 아직 남은 검증.
+- EXPERIMENTS.md: 후속 비교·chunked·URI 설계 검토 목록.
+- 이전 개인 구현과 build/legacy/의 보관 바이너리는 현재 Makefile의 빌드 대상이 아니다.
+
+## 빌드 산출물과 라우터 분리
+make는 build/server 및 build/obj/*.o를 만든다. 테스트 바이너리도 build/test_*에 생성한다. make test_parse_port 등 기존 개별 빌드 명령은 새 경로 대상의 별칭이다. make clean은 현재 서버·객체·테스트 산출물을 지우며 build/legacy의 보관 파일은 유지한다. build 전체는 Git 추적에서 제외한다.
+
+src/http.c는 구문 해석과 상태 문구, src/router.c는 경로/메서드 판별과 응답 내용 선택, src/server.c는 I/O와 연결 자원 수명을 담당한다. 라우터의 응답 본문은 기존 공간을 빌려 참조한다. 기존 HTTP 동작과 컴파일 옵션을 유지했다.
