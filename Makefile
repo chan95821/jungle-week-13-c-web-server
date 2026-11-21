@@ -2,11 +2,14 @@ CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Werror -O2
 ASAN_FLAGS = -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined
 
+BUILD_DIR = build
 TARGET = server
-TEST_BINS = test_parse_port test_recv_header test_send_all
+TEST_NAMES = test_parse_port test_recv_header test_send_all test_parse_request test_recv_body test_dispatch
+TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
-SRCS = src/main.c src/server.c
-OBJS = $(SRCS:.c=.o)
+LIB_SRCS = src/server.c src/http_parse.c src/router.c
+SRCS = src/main.c $(LIB_SRCS)
+OBJS = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRCS))
 
 .PHONY: all test verify clean
 
@@ -15,17 +18,19 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
-%.o: %.c src/server.h
+$(BUILD_DIR)/%.o: src/%.c src/server.h
+	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 test: $(TEST_BINS)
 	@for t in $(TEST_BINS); do ./$$t || exit 1; done
 
-test_%: tests/unit/test_%.c src/server.c src/server.h
-	$(CC) $(ASAN_FLAGS) -o $@ $< src/server.c
+$(BUILD_DIR)/test_%: tests/unit/test_%.c $(LIB_SRCS) src/server.h
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(ASAN_FLAGS) -o $@ $< $(LIB_SRCS)
 
 verify: $(TARGET)
-	python3 scripts/verify_iter1.py
+	python3 scripts/verify_iter2.py
 
 clean:
-	rm -f $(OBJS) $(TARGET) $(TEST_BINS)
+	rm -rf $(BUILD_DIR) $(TARGET)
