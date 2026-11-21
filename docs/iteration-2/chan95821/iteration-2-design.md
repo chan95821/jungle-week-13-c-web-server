@@ -153,12 +153,11 @@ int recv_body(int fd, const char *excess, size_t excess_len,
 void dispatch_request(const HttpRequest *req, HttpResponse *resp);
 ```
 - `req->uri`에서 `?` 앞부분(`path_len`)만 분리해 경로 비교에 사용한다.
-- `POST` 요청인데 `!req->has_content_length`인 경우 → `set_error_response(resp, 411)` (`411 Length Required`)
 - `path`가 `/` 또는 `/hello`인 경우:
   - `GET` → `handle_get_hello(resp)` (`200 OK`, `text/plain`, `"Hello"`)
   - 그 외 메서드 → `set_error_response(resp, 405)` (`405 Method Not Allowed`)
 - `path`가 `/echo`인 경우:
-  - `POST` → `handle_post_echo(req, resp)` (`200 OK`, `req->content_type` 또는 `"application/octet-stream"`, `req->body`, `req->body_len`)
+  - `POST` → `handle_post_echo(req, resp)` (내부에서 `!req->has_content_length` 시 `411 Length Required` 반환, 정상이면 `200 OK`, `req->content_type` 또는 `"application/octet-stream"`, `req->body`, `req->body_len`)
   - 그 외 메서드 → `set_error_response(resp, 405)` (`405 Method Not Allowed`)
 - 그 외 경로 → `set_error_response(resp, 404)` (`404 Not Found`)
 - `set_error_response(resp, status)`는 정적 매핑 테이블에서 상태 코드별 `(reason, body)`를 찾아 `owns_body = 0`, `Content-Type: text/plain`으로 설정한다.
@@ -167,7 +166,7 @@ void dispatch_request(const HttpRequest *req, HttpResponse *resp);
 ```c
 int send_http_response(int connfd, const HttpResponse *resp);
 ```
-- `snprintf`로 상태 라인 + `Content-Type` + `Content-Length: %zu` + `Connection: close` + `\r\n` 헤더를 스택 버퍼에 직렬화해 `send_all()` 호출.
+- `snprintf`로 상태 라인 + `Content-Type` + `Content-Length: %zu` + `Connection: close` + `\r\n` 헤더를 `RESP_HEADER_MAX_BYTES` (`512B`, `_Static_assert`로 `REQ_CONTENT_TYPE_MAX_BYTES + 128` 이상 보장) 스택 버퍼에 직렬화해 `send_all()` 호출.
 - `resp->body_len > 0`이면 `send_all(connfd, resp->body, resp->body_len)` 호출.
 
 ---

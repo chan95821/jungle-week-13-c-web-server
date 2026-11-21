@@ -4,6 +4,19 @@
 
 ---
 
+## 0. 전제 탐색 요약 (Assumption Traceability)
+
+| 처리 단계 | 암묵적 전제 | 외부 보장 여부 | 실패 조건 | 설계 결정 |
+| --- | --- | --- | --- | --- |
+| 헤더/본문 경계 | `recv()`가 헤더와 본문을 분리해 준다 | 미보장 (TCP 바이트 스트림) | 동반 도착(`excess`), 본문 내 `\r\n\r\n`, 분할 도착 | `header_len`/`total_len` 분리 후 `excess`를 `recv_body`로 인계 |
+| 헤드 문법 파싱 | 입력이 안전한 C 문자열이고 표준 CRLF다 | 미보장 (악의적/비표준 입력) | `\0` 바이트 우회, 단독 `\n`/`\r`, 콜론 앞 공백 | `validate_head_bytes` + 엄격 토큰/문자셋 검증(`400`) |
+| 본문 길이 해석 | `Content-Length`가 하나이며 정상 정수다 | 미보장 (RFC 9112 스머글링 위협) | 중복 `Content-Length`, 오버플로우, `Transfer-Encoding` 혼재 | 중복·혼재(`400`), 상한 초과(`413`), `TE` 단독(`501`) |
+| 본문 수신 | `recv` 도중 연결이 유지되고 오류가 없다 | 미보장 (조기 `EOF`, 소켓 오류) | 본문 수신 중 `EOF(0)` 또는 `recv() < 0` | `buf` 즉시 `free` 후 `-1` 반환 (누수 없음) |
+| 수신 시간/대기 | 클라이언트가 요청을 끝까지 보내거나 끊는다 | 미보장 (무응답 지연 / Slowloris) | 헤더/본문 일부만 보낸 뒤 무한 대기 | Iter 2 Out-of-Scope로 명시 ([Issue #10](https://github.com/chan95821/jungle-week-13-c-web-server/issues/10)) |
+| 라우팅/오류 우선 | `POST` 검증과 경로 검증 순서가 무관하다 | 내부 설계 의존 | `POST /unknown` + `CL` 누락 시 `411` 선반환 | `404`/`405` 라우트 판정 후 `POST /echo`에서만 `411` |
+
+---
+
 ## 1. `recv_until_header_end(fd, buf, cap, &header_len, &total_len)`
 
 ### 정상 및 경계 분리 케이스 (반환값 `0`)
@@ -99,6 +112,7 @@
 | `excess` 일부(3B) + 추가 `recv` 2회(4B + 3B) | 성공 (`0`), `out_len == 10` | 분할 수신 조합 |
 | 중간에 `\0`이 포함된 16바이트 바이너리 본문 | 성공 (`0`), `memcmp` 100% 일치 | `\0` 비의존 바이너리 안전성 |
 | 본문 5바이트 중 2바이트 수신 후 조기 `EOF` | 실패 (`-1`), 누수 없음 | 오류 경로 `free` 검증 (ASan) |
+| `excess` 2바이트 복사 후 `recv() < 0` 소켓 오류 (`EBADF`) | 실패 (`-1`), 누수 없음 | `recv()` 음수 반환 오류 경로 `free` 검증 (ASan) |
 
 ---
 
@@ -110,7 +124,8 @@
 | `GET /` | `200 OK`, `text/plain`, `"Hello"` | Iteration 1 회귀 호환 |
 | `POST /echo` + `Content-Length: 7` + 본문 `"abc\0def"` | `200 OK`, 본문 `"abc\0def"` (`7B`) | 바이너리 안전 에코 |
 | `POST /echo` + `Content-Length: 0` | `200 OK`, `Content-Length: 0`, 빈 본문 | 빈 본문 POST 허용 |
-| `POST /echo` + `Content-Length` 누락 | `411 Length Required` | `POST` 길이 헤더 필수 검증 |
+| `POST /echo` + `Content-Length` 누락 | `411 Length Required` | `POST /echo` 길이 헤더 필수 검증 |
+| `POST /unknown` / `POST /hello` + `Content-Length` 누락 | `404 Not Found` / `405 Method Not Allowed` | `411`보다 경로(`404`)·메서드(`405`) 판정 우선 |
 | `POST /echo` + `Content-Type: application/json` | `200 OK`, `Content-Type: application/json` | 요청 `Content-Type` 유지 |
 | `GET /unknown` | `404 Not Found`, `"404 Not Found\n"` | 미존재 라우트 처리 |
 | `GET /echo` / `POST /hello` / `PUT /echo` | `405 Method Not Allowed`, `"405 Method Not Allowed\n"` | 메서드 불일치 및 미지원 메서드 처리 |

@@ -11,6 +11,7 @@
 #define REQ_VERSION_MAX_BYTES      16
 #define REQ_HOST_MAX_BYTES         260           /* DNS 253B + :65535 + NUL */
 #define REQ_CONTENT_TYPE_MAX_BYTES 256           /* RFC 6838 MIME 최대 기준 */
+#define RESP_HEADER_MAX_BYTES      512           /* 응답 상태 라인 + 고정 헤더 상한 */
 
 typedef struct {
     char method[REQ_METHOD_MAX_BYTES];

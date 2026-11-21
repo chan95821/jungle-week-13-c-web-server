@@ -110,6 +110,25 @@ static void test_dispatch_routes(void) {
     dispatch_request(&req, &resp);
     assert(resp.status_code == 405);
     free_http_response(&resp);
+
+    /* POST /unknown, POST /hello (Content-Length 누락) -> 411보다 404/405 우선 */
+    memset(&req, 0, sizeof(req));
+    memset(&resp, 0, sizeof(resp));
+    strcpy(req.method, "POST");
+    strcpy(req.uri, "/unknown");
+    req.has_content_length = 0;
+    dispatch_request(&req, &resp);
+    assert(resp.status_code == 404);
+    free_http_response(&resp);
+
+    memset(&req, 0, sizeof(req));
+    memset(&resp, 0, sizeof(resp));
+    strcpy(req.method, "POST");
+    strcpy(req.uri, "/hello");
+    req.has_content_length = 0;
+    dispatch_request(&req, &resp);
+    assert(resp.status_code == 405);
+    free_http_response(&resp);
 }
 
 static void test_send_http_response_binary(void) {

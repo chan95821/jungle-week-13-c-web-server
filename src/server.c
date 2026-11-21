@@ -223,7 +223,9 @@ int recv_http_request(int connfd, HttpRequest *req, HttpStatus *http_status) {
 }
 
 int send_http_response(int connfd, const HttpResponse *resp) {
-    char header_buf[512];
+    _Static_assert(RESP_HEADER_MAX_BYTES >= REQ_CONTENT_TYPE_MAX_BYTES + 128,
+                   "RESP_HEADER_MAX_BYTES must accommodate response headers");
+    char header_buf[RESP_HEADER_MAX_BYTES];
     int n = snprintf(header_buf, sizeof(header_buf),
                      "HTTP/1.1 %d %s\r\n"
                      "Content-Type: %s\r\n"

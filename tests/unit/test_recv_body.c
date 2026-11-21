@@ -78,11 +78,22 @@ static void test_early_eof_no_leak(void) {
     close(sv[0]);
 }
 
+static void test_recv_error_no_leak(void) {
+    uint8_t *body = NULL;
+    size_t len = 0;
+
+    /* excess 일부 복사 후 유효하지 않은 fd(-1)에서 recv() 오류(< 0) 발생 시 누수 없이 -1 반환 */
+    assert(recv_body(-1, "ab", 2, 5, &body, &len) == -1);
+    assert(body == NULL);
+    assert(len == 0);
+}
+
 int main(void) {
     test_zero_length();
     test_excess_covers_all();
     test_split_recv_and_binary();
     test_early_eof_no_leak();
+    test_recv_error_no_leak();
     printf("[PASS] test_recv_body\n");
     return 0;
 }

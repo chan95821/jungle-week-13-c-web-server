@@ -56,7 +56,7 @@ TCP 바이트 스트림에서 HTTP/1.1 요청 라인·헤더·본문 경계를 �
 - `HttpRequest.uri`에는 query string을 포함한 원본 URI를 통째로 저장하고, `dispatch_request` 시점에만 `?` 앞부분(path)을 분리해 라우팅한다.
 - **지원 라우트**:
   - `GET /` 및 `GET /hello`: `200 OK`, `Content-Type: text/plain`, `Content-Length: 5`, `Connection: close`, 본문 `Hello` *(Iteration 1 회귀 호환; `/hello?a=1` 등 query string 포함 시에도 path 기준 `/hello`로 라우팅)*
-  - `POST /echo`: `200 OK`, 요청 본문(`body`, `body_len`)을 그대로 응답 본문으로 반환한다. (`Content-Length`는 실제 본문 바이트 길이로 동적 생성, `Content-Type`은 요청에 있으면 유지하고 없으면 `application/octet-stream` 사용, `Content-Length: 0` 명시 시 빈 본문 반환, `Content-Length`가 없는 `POST`는 `411 Length Required` 거부)
+  - `POST /echo`: `200 OK`, 요청 본문(`body`, `body_len`)을 그대로 응답 본문으로 반환한다. (`Content-Length`는 실제 본문 바이트 길이로 동적 생성, `Content-Type`은 요청에 있으면 유지하고 없으면 `application/octet-stream` 사용, `Content-Length: 0` 명시 시 빈 본문 반환, `Content-Length`가 없는 `POST /echo`는 `411 Length Required` 거부 — 단, 미존재 경로(`404`)·미지원 메서드(`405`) 판정이 `411`보다 우선한다)
 
 ### D. 오류 처리 및 상태 코드 정책
 - **응답 없이 즉시 연결 종료**:
@@ -86,6 +86,7 @@ TCP 바이트 스트림에서 HTTP/1.1 요청 라인·헤더·본문 경계를 �
 Iteration 2에서는 아래 항목을 구현하지 않는다:
 - `Transfer-Encoding: chunked` 디코딩 *(감지 시 `501` 거부)*
 - `Connection: keep-alive` 지속 연결 *(항상 `Connection: close` 응답 후 종료)*
+- 소켓 수신 타임아웃 (`SO_RCVTIMEO`, 무응답 연결 지연/Slowloris 방어 *(→ Iteration 6 / [Issue #10](https://github.com/chan95821/jungle-week-13-c-web-server/issues/10))*)
 - 정적 파일 서빙, MIME 타입 매핑, 경로 탐색(`../`) 방어 *(→ Iteration 3)*
 - Reverse Proxy *(→ Iteration 4; Forward Proxy 및 HTTPS `CONNECT`는 전체 범위 제외)*
 - 동시 요청 처리 (`fork`, `pthread`, `select`/`poll`/`epoll`/`kqueue`) *(→ Iteration 5)*

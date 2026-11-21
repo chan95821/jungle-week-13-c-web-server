@@ -68,6 +68,10 @@ static void handle_get_hello(const HttpRequest *req, HttpResponse *resp) {
 
 /* req->body를 복사 없이 참조(owns_body=0)하는 200 OK 에코 응답을 설정한다. */
 static void handle_post_echo(const HttpRequest *req, HttpResponse *resp) {
+    if (!req->has_content_length) {
+        set_error_response(resp, HTTP_STATUS_LENGTH_REQUIRED);
+        return;
+    }
     resp->status_code = HTTP_STATUS_OK;
     resp->reason = "OK";
     resp->content_type = req->has_content_type ? req->content_type : "application/octet-stream";
@@ -84,11 +88,6 @@ static const RouteEntry ROUTES[] = {
 
 void dispatch_request(const HttpRequest *req, HttpResponse *resp) {
     if (req == NULL || resp == NULL) {
-        return;
-    }
-
-    if (strcmp(req->method, "POST") == 0 && !req->has_content_length) {
-        set_error_response(resp, HTTP_STATUS_LENGTH_REQUIRED);
         return;
     }
 
