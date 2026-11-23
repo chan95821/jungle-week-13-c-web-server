@@ -75,8 +75,9 @@ static int parse_add_parameters(struct http_slice body, int64_t *a, int64_t *b) 
         while (equal < end && body.data[equal] != '=') ++equal;
         if (equal == offset || equal == end) return 400;
 
-        /* 元のbodyはNUL終端されていないので、明示的な長さで区切る。
-         * a/bは1文字、64bit整数は符号込み最大20文字だが作業用には32文字を確保。 */
+        /* 원본 body는 NUL 종료가 없으므로 명시적인 길이로 구간을 나눈다.
+         * a/b 키는 한 글자다. 정수 표기는 종료 문자를 제외하고 최대 31바이트를 받는다.
+         * 64비트 정수의 일반적인 표기는 부호를 포함해 최대 20글자다. */
         char key[2], value[32];
         size_t key_length, value_length;
         int status = decode_form_component(
@@ -121,22 +122,24 @@ int prepare_dynamic_response(const struct http_request *request, enum http_route
     if (status) return status;
     int length;
     if (route == HTTP_ROUTE_TIME) {
-        /* timeは標準Cライブラリ関数。既存のCLOCK_MONOTONICは期限用、ここでは
-         * 実際の現在時刻を返す。タイムゾーンの表示形式ではなくUnix秒数を送る。 */
+        /* time은 표준 C 라이브러리 함수다. 기존 CLOCK_MONOTONIC은 대기 기한용이고,
+         * 여기서는 실제 현재 시각을 얻는다. 지역 시각 문자열 대신 Unix 초를 보낸다. */
         time_t now = time(NULL);
         if (now == (time_t)-1) return 500;
         length = snprintf(buffer, capacity, "{\"timestamp\":%" PRIdMAX "}\n", (intmax_t)now);
     } else if (route == HTTP_ROUTE_ADD) {
-        int64_t a, b;
+        int64_t a = 0, b = 0;
         status = parse_add_parameters(request->body, &a, &b);
         if (status) return status;
-        /* signed加算を実行してから検査すると既に未定義動作になる。先に範囲を確認する。 */
+        /* signed 덧셈 후에 검사하면 이미 정의되지 않은 동작이 될 수 있으므로,
+         * 실제 a+b를 계산하기 전에 결과가 정수 범위 안인지 확인한다. */
         if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) return 400;
         length = snprintf(buffer, capacity, "{\"result\":%" PRId64 "}\n", a + b);
     } else {
         return 500;
     }
-    /* snprintfは切り詰めても本来必要な長さを返すので、戻り値の上限も確認する。 */
+    /* snprintf는 잘린 경우에도 원래 필요했던 길이를 반환한다.
+     * 버퍼보다 긴 결과를 그대로 send하지 않도록 반환값의 상한도 검사한다. */
     if (length < 0 || (size_t)length >= capacity) return 500;
     *response = (struct router_response){
         .status = 200,

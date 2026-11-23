@@ -69,6 +69,33 @@ application/octet-stream이다. 텍스트 샘플은 UTF-8이다. 오류 응답�
 [Iteration 3 코드 해설](docs/iteration-3/jaeseong/iteration-3-walkthrough.md)을 참고한다.
 설계 선택과 검증 상태는 해당 폴더의 요구사항·테스트 문서에 기록한다.
 
+## 동적 API — 정적 파일과 별도 모듈
+
+정적 파일은 `src/static_file.c`, 동적 응답 생성은 `src/dynamic.c`가 담당한다.
+기존 정적 샘플 페이지는 변경하지 않았다. 요청 파싱·소켓 전송·종료 처리는 공유한다.
+
+```sh
+curl --noproxy '*' -i http://127.0.0.1:8080/api/time
+# 예시 형태: {"timestamp":1795392000}
+
+curl --noproxy '*' -i --data 'a=10&b=20' http://127.0.0.1:8080/api/add
+# 예시 형태: {"result":30}
+
+curl --noproxy '*' -i --data 'a=-10&b=3' http://127.0.0.1:8080/api/add
+# 예시 형태: {"result":-7}
+```
+
+위 출력은 API 계약 예시이며 실행 결과가 아니다. 정상 응답 타입은 application/json이다.
+add는 application/x-www-form-urlencoded 입력을 사용하며 curl --data가 해당 헤더를
+설정한다. a와 b는 각각 하나의 부호 있는 64비트 정수다. 누락·중복·잘못된 값·덧셈
+오버플로우는 400, 다른/누락 Content-Type은 415다. 값의 표기는 디코딩 후 최대 31바이트다.
+폼에서 +는 공백을 의미하므로 양수 부호를 쓰려면 %2B로 인코딩한다.
+
+응답 생성 버퍼는 handle_client가 소유하고 전송까지 유지한다. 동적 함수는 소켓을
+직접 쓰거나 파일을 읽지 않는다. CGI·외부 백엔드·DB 기능은 포함하지 않는다.
+[동적 API 코드 해설](docs/dynamic-api/walkthrough.md)에 함수 호출과 메모리 수명을 설명했다.
+현재 빌드·실행 검증은 미완료이며 테스트 실행 제한을 유지한다.
+
 ## 이번 지원 범위
 
 - IPv4 0.0.0.0, 블로킹 순차 처리, 연결당 요청 하나, Connection: close.
@@ -77,7 +104,8 @@ application/octet-stream이다. 텍스트 샘플은 UTF-8이다. 오류 응답�
   /static/ 아래 파일 처리에서만 상대 경로를 한 번 디코딩하고 루트 경계를 검사한다.
 - 헤더 이름 대소문자·OWS 처리, 유효한 단일 Host, 엄격한 Content-Length, Connection·Expect를 해석한다. 유효한 일반 미지원 필드는 의미 처리 없이 건너뛴다.
 - 길이 정보 없음은 본문 0. 같은 값의 중복 길이·쉼표 목록·충돌 정보도 거절한다. 바이너리 본문 경계는 선언 길이로 정하며 내용으로 추측하지 않는다.
-- 요청 타입 반영, JSON 파싱·압축 해제, keep-alive, 다음 요청 처리는 제외한다.
+- /echo의 요청 타입 반영, JSON 요청 파싱·압축 해제, keep-alive, 다음 요청 처리는 제외한다.
+  /api/add에서만 Content-Type을 확인해 form 본문을 해석한다.
 - HEAD는 지원하지 않아 501로 거부하되 HEAD 응답에는 본문을 보내지 않는다. 이를 HEAD 기능 지원으로 표시하지 않는다.
 
 ## 임시 상수와 소유권

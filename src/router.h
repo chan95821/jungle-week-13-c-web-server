@@ -21,7 +21,8 @@ struct router_response {
 int http_route_request(const struct http_request *request,
                        enum http_route *route, const char **allow);
 
-/* Select content only. Does not allocate, free, or perform socket I/O. */
+/* 기존 메모리 응답과 공통 오류 응답만 선택한다. 파일 성공 응답은 static_file,
+ * 동적 성공 응답은 dynamic 모듈이 준비한다. 할당/해제/소켓 I/O는 하지 않는다. */
 struct router_response router_prepare_response(const struct http_request *request,
                                                enum http_route route, int status,
                                                const char *allow);

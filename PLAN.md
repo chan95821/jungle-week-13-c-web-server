@@ -162,3 +162,4 @@ build/server·build/obj/main.o·build/test_send_all·build/legacy/webserver가 �
 - 응답 메모리는 handle_client의 고정 버퍼를 빌려 쓰며, 동적 함수가 입력 해석·계산·문자열 생성을 맡고 기존 전송 함수가 송신한다. 상세 한글 주석과 흐름 문서를 작성한다.
 - add 입력은 a/b 각 하나의 부호 있는 64비트 정수이며 합계 오버플로우를 검사한다. 요청 Content-Type은 application/x-www-form-urlencoded를 사용한다. 성공 응답은 application/json, 오류는 기존 HTTP 오류 응답 흐름을 사용한다.
 - 현재 검증 제한과 Docker 사용 답변 대기를 유지한다. 이번 기능 선택을 테스트·성능 측정 실행 허락으로 확대하지 않는다.
+- 사용자가 정적/동적 분리를 재확인했다. 정적 파일 모듈 및 샘플 페이지는 유지하고, 동적 처리는 dynamic.c/h로 분리한다. 별도 UI 변경은 하지 않는다. 숫자 입력 작업 공간은 값당 31바이트까지로 제한한다.
