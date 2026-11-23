@@ -1,15 +1,17 @@
 # jungle-week-13-c-web-server
 
-C/POSIX HTTP 서버의 개인 Iteration 2 구현이다. 팀 공통 범위는 docs/DEVELOPMENT_CONTEXT.md와 Issue #2, 개인 선택은 PLAN.md 및 docs/iteration-2/Snoopykid/를 참고한다.
+C/POSIX HTTP 서버다. 기존 Iteration 2 구현에 개인 Iteration 3 정적 파일 서빙을 추가했다.
+팀 공통 범위는 docs/DEVELOPMENT_CONTEXT.md와 해당 Issue, 개인 선택은 PLAN.md를 참고한다.
 
 ## 실행
 
 Ubuntu WSL2 셸:
 
 ```sh
-cd /mnt/c/Users/David/SW-AI-W02-03-TEMPLATE/jungle-week-13-c-web-server
 make
 ./build/server 8080
+# 다른 디렉터리를 파일 루트로 지정할 수도 있다.
+./build/server 8080 /absolute/path/to/documents
 ```
 
 서버는 시작 로그 없이 연결을 기다린다. 다른 터미널에서 수동 확인할 수 있다.
@@ -21,11 +23,58 @@ curl --noproxy '*' -i --data-binary 'hello' http://127.0.0.1:8080/echo
 
 GET /와 /hello는 text/plain 및 줄바꿈 없는 Hello 5바이트다. POST /echo는 입력 바이트 그대로, application/octet-stream과 실제 본문 길이로 응답한다. 종료는 서버 터미널의 Ctrl+C다. 이 명령들은 사용 안내이며 이 작업에서 서버·curl을 실행했다는 뜻은 아니다.
 
+## 정적 파일 사용과 코드 읽기
+
+루트를 생략하면 현재 디렉터리의 public을 사용한다. 서버를 실행한 뒤 브라우저에서
+`http://localhost:8080/static/`을 열면 HTML, CSS, SVG 샘플을 볼 수 있다.
+기존 `/`는 Hello를 유지한다. `/static/`만 루트의 index.html로 연결하며 하위 디렉터리
+목록이나 자동 index 탐색은 제공하지 않는다.
+
+```sh
+curl --noproxy '*' -i http://127.0.0.1:8080/static/
+curl --noproxy '*' -i http://127.0.0.1:8080/static/css/style.css
+curl --noproxy '*' -i http://127.0.0.1:8080/static/images/jungle.svg
+curl --noproxy '*' -i http://127.0.0.1:8080/static/missing.html  # 404
+curl --noproxy '*' -i http://127.0.0.1:8080/static/images/       # 403
+curl --noproxy '*' --path-as-is -i http://127.0.0.1:8080/static/../secret  # 403
+```
+
+```text
+main: open_static_root → 루트 FD 보관 → 연결마다 빌려주기
+  → handle_client
+      → 헤더 수신 / http_parse_request
+      → http_route_request: /static/ GET 판정
+      → prepare_static_file: 한 번 디코딩 → 경로 요소 검사 → openat → fstat → MIME
+      → 기존 요청 본문 수신 / 필요한 100 Continue
+      → send_response_header → send_file_body → 기존 send_bytes
+      → finish_response → 파일 FD close / 요청 본문 free
+  → 연결 FD close → 서버 종료 시 루트 FD close
+```
+
+파일은 16KiB씩 읽고 실제 읽은 길이만 전송한다. 64KiB 요청 본문 상한을 파일 응답에
+적용하지 않는다. 정적 파일은 요청마다 열고, 처음 확인한 파일 크기를 Content-Length로
+보낸다. 원본 파일이 전송 중 수정되는 경우 전체 내용의 스냅샷은 보장하지 않는다.
+
+경로는 원본 slice를 바꾸지 않고 한 번 디코딩한다. +는 파일명 그대로이며 NUL/제어
+문자/역슬래시/빈 요소는 400, .과 .. 요소 및 심볼릭 링크(중간 포함)·디렉터리·특수 파일·
+권한 거부는 403, 없는 경로는 404다. 파일 루트 설정은 관리자가 선택한 경로이며,
+클라이언트가 요청하는 하위 경로의 심볼릭 링크는 따라가지 않는다.
+
+HTML/CSS/JS/PNG/JPEG/GIF/SVG 확장자를 MIME으로 매핑하며, 모르는 확장자는
+application/octet-stream이다. 텍스트 샘플은 UTF-8이다. 오류 응답에는 내부 파일 경로를
+노출하지 않는다. 파일 열기 등 서버 내부 오류는 500이며, 200 헤더 전송 뒤 파일 읽기가
+실패하면 새 오류 응답을 붙이지 않고 연결을 닫는다.
+
+추가 함수와 소유권을 순서대로 설명한 문서는
+[Iteration 3 코드 해설](docs/iteration-3/jaeseong/iteration-3-walkthrough.md)을 참고한다.
+설계 선택과 검증 상태는 해당 폴더의 요구사항·테스트 문서에 기록한다.
+
 ## 이번 지원 범위
 
 - IPv4 0.0.0.0, 블로킹 순차 처리, 연결당 요청 하나, Connection: close.
 - HTTP/1.1 origin-form만 지원하는 제한 구현이다. 완전한 HTTP/1.1 구현이 아니다. absolute-form은 거부하고 chunked/Transfer-Encoding 요청도 거부한다.
-- 첫 물음표 앞 원래 경로로 라우팅한다. 유효한 percent escape 구문은 검사하지만 디코딩·정규화하지 않는다. 정적 파일 설계 전 루트 밖 접근 방지와 함께 재검토한다.
+- 첫 물음표 앞 원래 경로로 라우팅한다. 파서는 percent escape 구문만 검사한다.
+  /static/ 아래 파일 처리에서만 상대 경로를 한 번 디코딩하고 루트 경계를 검사한다.
 - 헤더 이름 대소문자·OWS 처리, 유효한 단일 Host, 엄격한 Content-Length, Connection·Expect를 해석한다. 유효한 일반 미지원 필드는 의미 처리 없이 건너뛴다.
 - 길이 정보 없음은 본문 0. 같은 값의 중복 길이·쉼표 목록·충돌 정보도 거절한다. 바이너리 본문 경계는 선언 길이로 정하며 내용으로 추측하지 않는다.
 - 요청 타입 반영, JSON 파싱·압축 해제, keep-alive, 다음 요청 처리는 제외한다.
@@ -64,7 +113,13 @@ make test
 make verify
 ```
 
-make test는 기존 세 단위 테스트와 test_http_parser를 실행한다. make verify는 갱신한 1단계 E2E와 기본 2단계 E2E를 실행한다. 기본 E2E에는 시간 기한·폐기 상한·할당 실패 주입의 모든 분기가 포함되지 않으므로 전체 완료 증거로 확대하지 않는다. 해당 기본 기능 검증 방법은 별도 범위 검토가 필요하다. 광범위한 조합·퍼징·장시간/경합 회귀는 6단계에서 확대한다. 성능 계측·부하는 별도 허락 대상이다.
+make test는 기존 세 단위 테스트와 test_http_parser, test_static_file을 실행한다.
+make verify는 1·2·3단계 E2E를 실행한다. test_static_file의 임시 파일은 /tmp에 만들며,
+3단계 E2E는 임시 루트에서 실제 권한 거부와 바이너리 무결성을 확인한다.
+검증기 실행자가 root이면 E2E 서버는 비루트 UID로 실행한다.
+SERVER_BIN 환경 변수로 별도 빌드의 실행 파일을 지정할 수 있다.
+기본 E2E에 기존 시간 기한·폐기 상한·할당 실패 주입의 모든 분기가 포함되지는 않는다.
+광범위한 조합·퍼징·장시간/경합 회귀 및 성능 계측·부하는 별도 범위다.
 
 ## 설명과 기록
 

@@ -74,7 +74,7 @@ class StaticTests(unittest.TestCase):
     @classmethod
     def spawn(cls, port, limited=False):
         options = {}
-        # rootでテストを起動してもHTTPサーバは非rootで実行し、chmod 000の403を実証する。
+        # 검증기를 root로 실행해도 서버는 비루트로 실행해 chmod 000의 403을 확인한다.
         if os.geteuid() == 0:
             options.update(user=65534, group=65534, extra_groups=[])
         if limited:
