@@ -3,7 +3,10 @@
 
 #include "http.h"
 
-enum http_route { HTTP_ROUTE_HELLO, HTTP_ROUTE_ECHO, HTTP_ROUTE_STATIC };
+enum http_route {
+    HTTP_ROUTE_HELLO, HTTP_ROUTE_ECHO, HTTP_ROUTE_STATIC,
+    HTTP_ROUTE_TIME, HTTP_ROUTE_ADD
+};
 
 /* Borrows body storage owned by handle_client or a static literal. */
 struct router_response {

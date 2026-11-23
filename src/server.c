@@ -2,6 +2,7 @@
 #include "server.h"
 #include "router.h"
 #include "static_file.h"
+#include "dynamic.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -247,6 +248,9 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     unsigned char *body = NULL;
     struct http_request request = {0};
     struct static_file file = {.fd = -1};
+    /* 동적 함수가 만든 JSON은 이 버퍼에 놓인다. 함수 호출이 끝나도 handle_client가
+     * 반환하기 전까지 유효하므로 send_response가 안전하게 읽을 수 있다. */
+    char dynamic_body[DYNAMIC_RESPONSE_CAPACITY];
     enum http_route route = HTTP_ROUTE_HELLO;
     const char *allow = NULL;
     size_t received = 0, header_end = 0, body_received = 0;
@@ -282,6 +286,10 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     if (status) goto respond;
     status = http_route_request(&request, &route, &allow);
     if (status) goto respond;
+    if (route == HTTP_ROUTE_TIME || route == HTTP_ROUTE_ADD) {
+        status = dynamic_check_headers(&request, route);
+        if (status) goto respond;
+    }
     /* 파일 확인은 최종 200 헤더 및 100 Continue 전에 한다.
      * 없는 파일/금지 경로라면 본문을 더 보내도록 요구하지 않고 오류로 응답한다.
      * 성공한 GET도 선언한 요청 본문이 있으면 기존 정책대로 끝까지 수신한다. */
@@ -328,8 +336,16 @@ respond:
                                         file.length, NULL, false, &output);
             if (sent == 0) sent = send_file_body(connfd, &file, &output);
         } else {
-            struct router_response response =
-                router_prepare_response(&request, route, status, allow);
+            struct router_response response;
+            if (status == 200 && (route == HTTP_ROUTE_TIME || route == HTTP_ROUTE_ADD)) {
+                /* 요청 본문이 완성된 뒤에만 계산한다. 오류면 기존 오류 응답으로 바꾸고
+                 * 정상일 때만 호출자 소유 버퍼를 가리키는 JSON 응답을 전송한다. */
+                status = prepare_dynamic_response(&request, route, dynamic_body,
+                                                   sizeof(dynamic_body), &response);
+                if (status) response = router_prepare_response(&request, route, status, allow);
+            } else {
+                response = router_prepare_response(&request, route, status, allow);
+            }
             sent = send_response(connfd, response.status, response.content_type,
                                  response.body, response.length, response.allow,
                                  head_request, &output);

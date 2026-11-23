@@ -8,10 +8,10 @@ TARGET = $(BUILD_DIR)/server
 TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_static_file
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
-SRCS = src/main.c src/server.c src/http.c src/router.c src/static_file.c
+SRCS = src/main.c src/server.c src/http.c src/router.c src/static_file.c src/dynamic.c
 OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
-HEADERS = src/server.h src/http.h src/router.h src/static_file.h
-TEST_SRCS = src/server.c src/http.c src/router.c src/static_file.c
+HEADERS = src/server.h src/http.h src/router.h src/static_file.h src/dynamic.h
+TEST_SRCS = src/server.c src/http.c src/router.c src/static_file.c src/dynamic.c
 
 .PHONY: all test verify verify-static clean server $(TEST_NAMES)
 

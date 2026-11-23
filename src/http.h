@@ -20,12 +20,15 @@ struct http_request {
     struct http_slice version;
     struct http_slice path;
     struct http_slice host;
+    /* add API의 입력 형식을 판별하기 위한 원본 필드 참조. /echo는 계속 무시한다. */
+    struct http_slice content_type;
     struct http_slice body;
     size_t content_length;
     bool has_content_length;
     bool expect_continue;
     bool connection_close;
     bool connection_keep_alive;
+    bool duplicate_content_type;
 };
 
 /* Return 0 on success, otherwise an HTTP error status. Never modify input. */

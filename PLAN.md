@@ -153,3 +153,12 @@ build/server·build/obj/main.o·build/test_send_all·build/legacy/webserver가 �
 - Range/조건부 캐시/압축/HEAD 지원/동시성/성능 계측은 추가하지 않는다.
 - 사용자는 구현과 HTML/CSS/이미지 및 403·404 검증 완성을 요청했다. 기존 검증 보류를 일괄 해제하지 않으며, 구현 후 이번 단계의 구체적 검증 범위·환경을 제시해 확인한다.
 - 최종 검증 지시: `정적 파일 기본 기능만 검증. 더 나가지마`. HTML/CSS/SVG/PNG의 200·MIME·길이·바이트 일치와 읽기 권한 거부 403·파일 없음 404만 실행한다. 기존 회귀, 단위 실행, sanitizer 실행, 오류 주입·성능 측정은 실행하지 않는다. Ubuntu WSL 장애로 제안한 Docker 사용 여부는 답변 대기다.
+
+## 동적 API 사용자 선택 (2026-11-23)
+
+- 사용자가 `두 기능 고고`로 GET /api/time 및 POST /api/add 구성을 선택했다.
+- /api/time은 요청 시점의 Unix timestamp를 JSON으로 생성한다. /api/add는 form 본문 a=10&b=20을 해석해 JSON 합계를 만든다.
+- 기존 /, /hello, /echo와 /static/ 및 연결·수신 기한·본문 경계·종료 정책은 유지한다. CGI/외부 백엔드/DB/저장/인증은 추가하지 않는다.
+- 응답 메모리는 handle_client의 고정 버퍼를 빌려 쓰며, 동적 함수가 입력 해석·계산·문자열 생성을 맡고 기존 전송 함수가 송신한다. 상세 한글 주석과 흐름 문서를 작성한다.
+- add 입력은 a/b 각 하나의 부호 있는 64비트 정수이며 합계 오버플로우를 검사한다. 요청 Content-Type은 application/x-www-form-urlencoded를 사용한다. 성공 응답은 application/json, 오류는 기존 HTTP 오류 응답 흐름을 사용한다.
+- 현재 검증 제한과 Docker 사용 답변 대기를 유지한다. 이번 기능 선택을 테스트·성능 측정 실행 허락으로 확대하지 않는다.

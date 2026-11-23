@@ -317,6 +317,11 @@ int http_parse_request(const unsigned char *data, size_t length,
             r->has_content_length = true;
             status = parse_length(value, &r->content_length);
             if (status) return status;
+        } else if (equal_case(name, "content-type")) {
+            /* 파서는 값을 보관만 한다. API별 지원 여부는 dynamic.c가 판단한다.
+             * 중복 여부도 기록만 해서 기존 /echo 등의 무시 정책을 유지한다. */
+            if (r->content_type.data) r->duplicate_content_type = true;
+            else r->content_type = value;
         } else if (equal_case(name, "transfer-encoding")) {
             transfer_seen = true;
             status = parse_transfer(value, &last_chunked, &chunked_count);
@@ -348,6 +353,7 @@ const char *http_reason(int status) {
     case 405: return "Method Not Allowed";
     case 408: return "Request Timeout";
     case 413: return "Content Too Large";
+    case 415: return "Unsupported Media Type";
     case 417: return "Expectation Failed";
     case 431: return "Request Header Fields Too Large";
     case 500: return "Internal Server Error";

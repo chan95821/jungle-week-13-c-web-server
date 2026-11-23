@@ -19,6 +19,18 @@ int http_route_request(const struct http_request *r,
         *route = HTTP_ROUTE_ECHO;
         return 0;
     }
+    /* 동적 기능도 라우터는 경로/메서드만 판정한다. 본문 해석과 계산은 dynamic.c,
+     * 파일 읽기는 static_file.c에 따로 두고 실제 송신은 server.c가 맡는다. */
+    if (http_slice_equal(r->path, "/api/time")) {
+        if (!get) { *allow = "GET"; return 405; }
+        *route = HTTP_ROUTE_TIME;
+        return 0;
+    }
+    if (http_slice_equal(r->path, "/api/add")) {
+        if (!post) { *allow = "POST"; return 405; }
+        *route = HTTP_ROUTE_ADD;
+        return 0;
+    }
     /* 라우터는 어떤 처리인지 판정만 한다. 파일 존재/권한 확인은 파일 I/O 계층에
      * 맡겨서 순수 파싱·라우팅 테스트가 파일시스템에 의존하지 않게 한다. */
     const size_t prefix = sizeof(STATIC_URL_PREFIX) - 1;
