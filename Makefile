@@ -10,10 +10,11 @@ CGI_BINS = $(CGI_DIR)/order
 TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_body_send
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
-SRCS = src/main.c src/server.c src/http.c src/router.c
+HANDLER_SRCS = src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c
+SRCS = src/main.c src/server.c src/http.c src/router.c $(HANDLER_SRCS)
 OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
-HEADERS = src/server.h src/http.h src/router.h
-TEST_SRCS = src/server.c src/http.c src/router.c
+HEADERS = src/server.h src/http.h src/router.h src/handlers/handlers.h
+TEST_SRCS = src/server.c src/http.c src/router.c $(HANDLER_SRCS)
 
 .PHONY: all test verify clean server cgi $(TEST_NAMES)
 
@@ -28,7 +29,8 @@ $(TARGET): $(OBJS) | $(BUILD_DIR)
 $(CGI_DIR)/%: cgi-src/%.c | $(CGI_DIR)
 	$(CC) $(CFLAGS) -o $@ $<
 
-$(OBJ_DIR)/%.o: src/%.c $(HEADERS) | $(OBJ_DIR)
+$(OBJ_DIR)/%.o: src/%.c $(HEADERS)
+	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 server: $(TARGET)
@@ -41,7 +43,7 @@ test: $(TEST_BINS)
 	@for t in $(TEST_BINS); do ./$$t || exit 1; done
 
 $(BUILD_DIR)/test_body_send: tests/unit/test_body_send.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
-	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c src/router.c
+	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c src/router.c $(HANDLER_SRCS)
 
 $(BUILD_DIR)/test_%: tests/unit/test_%.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< $(TEST_SRCS)
