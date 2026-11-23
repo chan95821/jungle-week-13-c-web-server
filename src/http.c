@@ -14,6 +14,7 @@ static unsigned char ascii_lower(unsigned char c) {
     return c >= 'A' && c <= 'Z' ? (unsigned char)(c + ('a' - 'A')) : c;
 }
 
+/* Compare slice against lowercase ASCII string case-insensitively. */
 static bool equal_case(struct http_slice value, const char *text) {
     if (value.length != strlen(text)) return false;
     for (size_t i = 0; i < value.length; ++i) {
@@ -42,6 +43,7 @@ static bool token_char(unsigned char c) {
 }
 static bool ows(unsigned char c) { return c == ' ' || c == '\t'; }
 
+/* Trim leading and trailing optional whitespace (SP/HTAB) from a slice. */
 static struct http_slice trim(struct http_slice value) {
     while (value.length && ows(value.data[0])) {
         ++value.data;
@@ -51,6 +53,7 @@ static struct http_slice trim(struct http_slice value) {
     return value;
 }
 
+/* Return index of first CRLF in buffer, or SIZE_MAX if none exists. */
 static size_t crlf(const unsigned char *data, size_t length) {
     for (size_t i = 0; i + 1 < length; ++i) {
         if (data[i] == '\r' && data[i + 1] == '\n') return i;
@@ -58,6 +61,7 @@ static size_t crlf(const unsigned char *data, size_t length) {
     return SIZE_MAX;
 }
 
+/* Validate RFC 3986 reg-name syntax (unreserved / sub-delims / pct-encoded). */
 static bool valid_reg_name(struct http_slice name) {
     if (!name.length) return false;
     for (size_t i = 0; i < name.length; ++i) {
@@ -72,6 +76,7 @@ static bool valid_reg_name(struct http_slice name) {
     return true;
 }
 
+/* Validate RFC 3986 IP-literal (IPv6 via inet_pton or IPvFuture syntax). */
 static bool valid_ip_literal(struct http_slice value) {
     if (value.length > 3 && ascii_lower(value.data[0]) == 'v') {
         size_t i = 1;
@@ -91,8 +96,10 @@ static bool valid_ip_literal(struct http_slice value) {
     return inet_pton(AF_INET6, address, binary) == 1;
 }
 
+/* Validate Host header syntax (reg-name or bracketed IP-literal + optional port). */
 static bool valid_host(struct http_slice value) {
     if (!value.length) return false;
+
     size_t port_start;
     if (value.data[0] == '[') {
         size_t end = 1;
@@ -107,8 +114,10 @@ static bool valid_host(struct http_slice value) {
         while (port_start < value.length && value.data[port_start] != ':') ++port_start;
         if (!valid_reg_name((struct http_slice){value.data, port_start})) return false;
     }
+
     if (port_start == value.length) return true;
     if (value.data[port_start++] != ':') return false;
+
     /* URI port syntax permits an empty port; no DNS lookup is performed. */
     unsigned int port = 0;
     for (size_t i = port_start; i < value.length; ++i) {
@@ -120,6 +129,7 @@ static bool valid_host(struct http_slice value) {
     return true;
 }
 
+/* Check RFC 3986 URI characters and %XX syntax without inspecting decoded bytes. */
 static bool uri_characters(struct http_slice value, bool origin) {
     for (size_t i = 0; i < value.length; ++i) {
         unsigned char c = value.data[i];
@@ -136,6 +146,7 @@ static bool uri_characters(struct http_slice value, bool origin) {
     return true;
 }
 
+/* Parse HTTP/1.1 request-line into method, target, path, and raw query slices. */
 static int parse_start_line(struct http_slice line, struct http_request *r,
                             bool *unsupported_target) {
     size_t first = 0;
@@ -144,20 +155,25 @@ static int parse_start_line(struct http_slice line, struct http_request *r,
         ++first;
     }
     if (!first || first == line.length) return 400;
+
     size_t second = first + 1;
     while (second < line.length && line.data[second] != ' ') ++second;
     if (second == first + 1 || second == line.length) return 400;
+
     r->method = (struct http_slice){line.data, first};
     r->target = (struct http_slice){line.data + first + 1, second - first - 1};
     r->version = (struct http_slice){line.data + second + 1, line.length - second - 1};
+
     if (!http_slice_equal(r->version, "HTTP/1.1")) {
         if (r->version.length == 8 && memcmp(r->version.data, "HTTP/", 5) == 0 &&
             digit(r->version.data[5]) && r->version.data[6] == '.' &&
             digit(r->version.data[7])) return 505;
         return 400;
     }
+
     bool origin = r->target.data[0] == '/';
     if (!uri_characters(r->target, origin)) return 400;
+
     if (!origin) {
         size_t prefix = 0;
         if (r->target.length >= 7 && equal_case((struct http_slice){r->target.data, 7}, "http://")) prefix = 7;
@@ -175,12 +191,24 @@ static int parse_start_line(struct http_slice line, struct http_request *r,
         *unsupported_target = true;
         return 0;
     }
+
     size_t path_length = 0;
     while (path_length < r->target.length && r->target.data[path_length] != '?') ++path_length;
     r->path = (struct http_slice){r->target.data, path_length};
+
+    if (path_length < r->target.length) {
+        r->query = (struct http_slice){
+            r->target.data + path_length + 1,
+            r->target.length - path_length - 1
+        };
+    } else {
+        r->query = (struct http_slice){NULL, 0};
+    }
+
     return 0;
 }
 
+/* Parse non-negative decimal Content-Length without size_t overflow. Return 0 or 400. */
 static int parse_length(struct http_slice value, size_t *length) {
     if (!value.length) return 400;
     size_t result = 0;
@@ -194,6 +222,7 @@ static int parse_length(struct http_slice value, size_t *length) {
     return 0;
 }
 
+/* Parse Connection header option list for close/keep-alive tokens. Return 0 or 400. */
 static int parse_connection(struct http_slice value, struct http_request *r) {
     size_t i = 0;
     do {
@@ -211,6 +240,7 @@ static int parse_connection(struct http_slice value, struct http_request *r) {
     return 400;
 }
 
+/* Accept only 100-continue in Expect header; return 417 otherwise. */
 static int parse_expect(struct http_slice value) {
     size_t i = 0;
     do {
@@ -278,16 +308,20 @@ int http_parse_request(const unsigned char *data, size_t length,
     if (length > REQ_HEADER_MAX_BYTES) return 431;
     *r = (struct http_request){0};
     if (memcmp(data + length - 4, "\r\n\r\n", 4) != 0) return 400;
+
     size_t line_length = crlf(data, length);
     if (line_length == SIZE_MAX) return 400;
+
     bool unsupported_target = false;
     int status = parse_start_line((struct http_slice){data, line_length}, r,
                                   &unsupported_target);
     if (status) return status;
+
     size_t offset = line_length + 2;
     bool host_seen = false, transfer_seen = false, last_chunked = false;
     unsigned int chunked_count = 0;
     int expect_status = 0;
+
     while (offset < length) {
         size_t end = crlf(data + offset, length - offset);
         if (end == SIZE_MAX) return 400;
@@ -295,6 +329,7 @@ int http_parse_request(const unsigned char *data, size_t length,
             if (offset + 2 != length) return 400;
             break;
         }
+
         const unsigned char *line = data + offset;
         size_t colon = 0;
         while (colon < end && line[colon] != ':') {
@@ -302,12 +337,14 @@ int http_parse_request(const unsigned char *data, size_t length,
             ++colon;
         }
         if (!colon || colon == end) return 400;
+
         struct http_slice name = {line, colon};
         struct http_slice value = trim((struct http_slice){line + colon + 1, end - colon - 1});
         for (size_t i = 0; i < value.length; ++i) {
             unsigned char c = value.data[i];
             if ((c < 32 && c != '\t') || c == 127) return 400;
         }
+
         if (equal_case(name, "host")) {
             if (host_seen || !valid_host(value)) return 400;
             host_seen = true;
@@ -328,8 +365,10 @@ int http_parse_request(const unsigned char *data, size_t length,
             expect_status = parse_expect(value) ? 417 : expect_status;
             r->expect_continue = true;
         }
+
         offset += end + 2;
     }
+
     if (!host_seen) return 400;
     if (transfer_seen && r->has_content_length) return 400;
     if (transfer_seen) return last_chunked ? 501 : 400;
@@ -351,6 +390,7 @@ const char *http_reason(int status) {
     case 431: return "Request Header Fields Too Large";
     case 500: return "Internal Server Error";
     case 501: return "Not Implemented";
+    case 502: return "Bad Gateway";
     case 505: return "HTTP Version Not Supported";
     default: return "Internal Server Error";
     }
