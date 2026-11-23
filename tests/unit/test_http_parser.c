@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -397,6 +398,336 @@ static void memory_provider_contract(void) {
     if (response.body_provider.cleanup_func) response.body_provider.cleanup_func(response.body_provider.state);
 }
 
+static struct http_request route_query_input(const char *method, const char *path,
+                                             const char *query) {
+    struct http_request request = route_input(method, path);
+    if (query) {
+        request.query = (struct http_slice){(const unsigned char *)query, strlen(query)};
+    }
+    return request;
+}
+
+static void drain_provider(struct router_response *response, unsigned char *out,
+                           size_t cap, size_t *out_len) {
+    size_t total = 0;
+    for (;;) {
+        struct http_slice chunk = {0};
+        enum body_result res = response->body_provider.next_func(response->body_provider.state, &chunk);
+        if (res == BODY_END) break;
+        assert(res == BODY_DATA);
+        assert(chunk.data && chunk.length > 0);
+        assert(total + chunk.length <= cap);
+        memcpy(out + total, chunk.data, chunk.length);
+        total += chunk.length;
+    }
+    *out_len = total;
+    if (response->body_provider.cleanup_func) {
+        response->body_provider.cleanup_func(response->body_provider.state);
+    }
+}
+
+static void query_separation(void) {
+    struct {
+        const char *wire;
+        const char *path;
+        const char *query;
+    } cases[] = {
+        {"GET /greet HTTP/1.1\r\nHost: a\r\n\r\n", "/greet", ""},
+        {"GET /greet? HTTP/1.1\r\nHost: a\r\n\r\n", "/greet", ""},
+        {"GET /greet?name=Alice HTTP/1.1\r\nHost: a\r\n\r\n", "/greet", "name=Alice"},
+        {"GET /greet?name=a?b&x=1 HTTP/1.1\r\nHost: a\r\n\r\n", "/greet", "name=a?b&x=1"},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        struct http_request req;
+        assert(http_parse_request((const unsigned char *)cases[i].wire,
+                                  strlen(cases[i].wire), &req) == 0);
+        assert(http_slice_equal(req.path, cases[i].path));
+        assert(http_slice_equal(req.query, cases[i].query));
+    }
+}
+
+static void dynamic_route_selection(void) {
+    static const struct {
+        const char *method, *path;
+        int status;
+        const char *allow;
+    } cases[] = {
+        {"GET", "/greet", 0, NULL},
+        {"GET", "/greet/extra", 404, NULL},
+        {"GET", "/%67reet", 404, NULL},
+        {"POST", "/greet", 405, "GET"},
+        {"DELETE", "/greet", 501, NULL},
+        {"GET", "/cgi-bin/order", 0, NULL},
+        {"GET", "/cgi-bin/", 0, NULL},
+        {"GET", "/cgi-bin", 404, NULL},
+        {"GET", "/%63gi-bin/order", 404, NULL},
+        {"POST", "/cgi-bin/order", 405, "GET"},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        struct http_request req = route_input(cases[i].method, cases[i].path);
+        router_handler fn = NULL;
+        const char *allow = NULL;
+        assert(http_select_handler(&req, &fn, &allow) == cases[i].status);
+        assert((fn != NULL) == (cases[i].status == 0));
+        if (cases[i].allow) assert(allow && strcmp(allow, cases[i].allow) == 0);
+        else assert(allow == NULL);
+    }
+}
+
+static bool contains_bytes(const unsigned char *haystack, size_t hlen,
+                           const unsigned char *needle, size_t nlen) {
+    if (nlen == 0) return true;
+    if (hlen < nlen) return false;
+    for (size_t i = 0; i + nlen <= hlen; ++i) {
+        if (memcmp(haystack + i, needle, nlen) == 0) return true;
+    }
+    return false;
+}
+
+static void dynamic_greet_responses(void) {
+    static const struct {
+        const char *query;
+        int status;
+        const char *expected_substr;
+    } cases[] = {
+        {NULL, 200, "어서 오세요, 손님님!"},
+        {"", 200, "어서 오세요, 손님님!"},
+        {"foo=1", 200, "어서 오세요, 손님님!"},
+        {"name", 200, "어서 오세요, 손님님!"},
+        {"name=", 200, "어서 오세요, 손님님!"},
+        {"name=%20+", 200, "어서 오세요, 손님님!"},
+        {"Name=Alice", 200, "어서 오세요, 손님님!"},
+        {"name=+Alice+Kim+", 200, "어서 오세요, Alice Kim님!"},
+        {"%6E%61%6D%65=Alice", 200, "어서 오세요, Alice님!"},
+        {"&&foo=1&name=A%26B%3DC&&", 200, "어서 오세요, A&amp;B=C님!"},
+        {"name=a=b", 200, "어서 오세요, a=b님!"},
+        {"name=Alice&name=Bob", 200, "어서 오세요, Alice님!"},
+        {"name&name=Alice", 200, "어서 오세요, 손님님!"},
+        {"name=%3Cscript%3E%26%22%27", 200, "어서 오세요, &lt;script&gt;&amp;&quot;&#39;님!"},
+        {"name=%ED%99%8D%EA%B8%B8%EB%8F%99", 200, "어서 오세요, 홍길동님!"},
+        {"name=Alice%00", 400, NULL},
+        {"other=%00&name=Alice", 400, NULL},
+        {"na%00me=Alice", 400, NULL},
+        {"name=bad%2", 400, NULL},
+        {"name=%ZZ", 400, NULL},
+        {"name=a%0Ab", 400, NULL},
+        {"name=%09Alice", 400, NULL},
+        {"name=a%7Fb", 400, NULL},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        struct http_request req = route_query_input("GET", "/greet", cases[i].query);
+        static const unsigned char ignored_body[] = "hello";
+        req.body = (struct http_slice){ignored_body, sizeof(ignored_body) - 1};
+        router_handler fn = NULL;
+        const char *allow = NULL;
+        assert(http_select_handler(&req, &fn, &allow) == 0);
+        struct router_response resp;
+        fn(&req, &resp);
+        assert(resp.status == cases[i].status);
+        assert(!resp.chunked);
+        unsigned char buf[4096];
+        size_t len = 0;
+        drain_provider(&resp, buf, sizeof(buf), &len);
+        assert(len == resp.length);
+        if (cases[i].status == 200) {
+            assert(strcmp(resp.content_type, "text/html; charset=utf-8") == 0);
+            assert(contains_bytes(buf, len,
+                                  (const unsigned char *)cases[i].expected_substr,
+                                  strlen(cases[i].expected_substr)));
+            assert(!contains_bytes(buf, len, (const unsigned char *)"<script>", 8));
+        } else {
+            assert(strcmp(resp.content_type, "text/plain") == 0);
+        }
+    }
+
+    /* Invalid UTF-8 bytes are copied raw without validation. */
+    struct http_request invalid_utf8 = route_query_input("GET", "/greet", "name=%FF%FE");
+    router_handler fn = NULL;
+    const char *allow = NULL;
+    assert(http_select_handler(&invalid_utf8, &fn, &allow) == 0);
+    struct router_response resp;
+    fn(&invalid_utf8, &resp);
+    assert(resp.status == 200);
+    unsigned char buf[4096];
+    size_t len = 0;
+    drain_provider(&resp, buf, sizeof(buf), &len);
+    static const unsigned char raw_seq[] = {0xFF, 0xFE};
+    assert(contains_bytes(buf, len, raw_seq, sizeof(raw_seq)));
+
+    /* Long name expanding by 5x under HTML escaping (within REQ_HEADER_MAX_BYTES). */
+    char long_query[5 + 900 + 1];
+    memcpy(long_query, "name=", 5);
+    memset(long_query + 5, '\'', 900);
+    long_query[sizeof(long_query) - 1] = '\0';
+    struct http_request long_req = route_query_input("GET", "/greet", long_query);
+    assert(http_select_handler(&long_req, &fn, &allow) == 0);
+    fn(&long_req, &resp);
+    assert(resp.status == 200 && !resp.chunked);
+    unsigned char *long_buf = malloc(resp.length + 1);
+    assert(long_buf != NULL);
+    size_t long_len = 0;
+    drain_provider(&resp, long_buf, resp.length + 1, &long_len);
+    assert(long_len == resp.length && long_len > 900 * 5);
+    assert(contains_bytes(long_buf, long_len, (const unsigned char *)"&#39;&#39;&#39;", 15));
+    free(long_buf);
+}
+
+static void make_script(const char *path, const char *content, mode_t mode) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+    assert(fd >= 0);
+    size_t len = strlen(content);
+    assert(write(fd, content, len) == (ssize_t)len);
+    assert(close(fd) == 0);
+}
+
+static void cgi_responses_and_boundaries(void) {
+    char temp[] = "/tmp/iter3-cgi-XXXXXX";
+    int old_cwd = open(".", O_RDONLY);
+    assert(old_cwd >= 0 && mkdtemp(temp) != NULL);
+    assert(chdir(temp) == 0);
+
+    /* Without cgi-bin directory, CGI requests return 404. */
+    struct http_request req = route_query_input("GET", "/cgi-bin/ok", NULL);
+    router_handler fn = NULL;
+    const char *allow = NULL;
+    assert(http_select_handler(&req, &fn, &allow) == 0);
+    struct router_response resp;
+    fn(&req, &resp);
+    assert(resp.status == 404);
+    if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
+
+    assert(mkdir("cgi-bin", 0700) == 0);
+    assert(mkdir("cgi-bin/sub", 0700) == 0);
+    assert(mkdir("cgi-bin-other", 0700) == 0);
+    make_script("outside.sh", "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\nout'\n", 0700);
+    make_script("cgi-bin-other/sib.sh", "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\nsib'\n", 0700);
+    make_script("cgi-bin/nonexec.sh", "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\nno'\n", 0600);
+    make_script("cgi-bin/sub/nested.sh", "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\nsub'\n", 0700);
+    assert(symlink("../outside.sh", "cgi-bin/outlink.sh") == 0);
+    assert(symlink("../cgi-bin-other/sib.sh", "cgi-bin/siblink.sh") == 0);
+    assert(mkfifo("cgi-bin/fifo.sh", 0600) == 0);
+
+    /* Encoded path -> 400 */
+    req = route_query_input("GET", "/cgi-bin/%6fk", NULL);
+    assert(http_select_handler(&req, &fn, &allow) == 0);
+    fn(&req, &resp);
+    assert(resp.status == 400);
+    if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
+
+    /* Boundary / permission / non-regular / nested -> 404 */
+    const char *reject404[] = {
+        "/cgi-bin/", "/cgi-bin/missing", "/cgi-bin/sub", "/cgi-bin/sub/nested.sh",
+        "/cgi-bin/ok/extra", "/cgi-bin/../outside.sh", "/cgi-bin/outlink.sh",
+        "/cgi-bin/siblink.sh", "/cgi-bin/fifo.sh", "/cgi-bin/nonexec.sh"
+    };
+    for (size_t i = 0; i < sizeof(reject404) / sizeof(reject404[0]); ++i) {
+        req = route_query_input("GET", reject404[i], NULL);
+        assert(http_select_handler(&req, &fn, &allow) == 0);
+        fn(&req, &resp);
+        assert(resp.status == 404);
+        if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
+    }
+
+    /* Normal CGI with LF headers, environment isolation, and chunked flag */
+    assert(setenv("ITER3_PARENT_SECRET", "do-not-leak", 1) == 0);
+    make_script("cgi-bin/ok.sh",
+                "#!/bin/sh\n"
+                "printf 'Content-Type: text/plain\\nContent-Length: 999\\n\\n'\n"
+                "printf 'q=%s|m=%s|s=%s|sec=%s' \"$QUERY_STRING\" \"$REQUEST_METHOD\" \"$SCRIPT_NAME\" \"$ITER3_PARENT_SECRET\"\n",
+                0700);
+    req = route_query_input("GET", "/cgi-bin/ok.sh", "a=1&b=%20");
+    assert(http_select_handler(&req, &fn, &allow) == 0);
+    fn(&req, &resp);
+    assert(resp.status == 200 && resp.chunked);
+    assert(strcmp(resp.content_type, "text/plain") == 0);
+    unsigned char cgi_out[4096];
+    size_t cgi_len = 0;
+    drain_provider(&resp, cgi_out, sizeof(cgi_out), &cgi_len);
+    assert(cgi_len == strlen("q=a=1&b=%20|m=GET|s=/cgi-bin/ok.sh|sec="));
+    assert(memcmp(cgi_out, "q=a=1&b=%20|m=GET|s=/cgi-bin/ok.sh|sec=", cgi_len) == 0);
+
+    /* CRLF headers + custom Status: 400 */
+    make_script("cgi-bin/status400.sh",
+                "#!/bin/sh\n"
+                "printf 'Status: 400 Bad Request\\r\\nContent-Type: text/html; charset=utf-8\\r\\n\\r\\nbad'\n",
+                0700);
+    req = route_query_input("GET", "/cgi-bin/status400.sh", NULL);
+    fn(&req, &resp);
+    assert(resp.status == 400 && resp.chunked);
+    assert(strcmp(resp.content_type, "text/html; charset=utf-8") == 0);
+    drain_provider(&resp, cgi_out, sizeof(cgi_out), &cgi_len);
+    assert(cgi_len == 3 && memcmp(cgi_out, "bad", 3) == 0);
+
+    /* 502 failures: missing Content-Type, empty stdout, bad Status, bad shebang, oversized header */
+    make_script("cgi-bin/notype.sh", "#!/bin/sh\nprintf 'Status: 200 OK\\n\\nhi'\n", 0700);
+    make_script("cgi-bin/empty.sh", "#!/bin/sh\nexit 0\n", 0700);
+    make_script("cgi-bin/badstatus.sh", "#!/bin/sh\nprintf 'Status: 999 Weird\\nContent-Type: text/plain\\n\\nhi'\n", 0700);
+    make_script("cgi-bin/badexec.sh", "#!/nonexistent/interp\n", 0700);
+    make_script("cgi-bin/bighdr.sh",
+                "#!/bin/sh\n"
+                "printf 'Content-Type: text/plain\\nX-Big: '\n"
+                "dd if=/dev/zero bs=1 count=8300 2>/dev/null | tr '\\0' 'a'\n"
+                "printf '\\n\\nhi'\n",
+                0700);
+    const char *bad_cgis[] = {
+        "/cgi-bin/notype.sh", "/cgi-bin/empty.sh", "/cgi-bin/badstatus.sh",
+        "/cgi-bin/badexec.sh", "/cgi-bin/bighdr.sh"
+    };
+    for (size_t i = 0; i < sizeof(bad_cgis) / sizeof(bad_cgis[0]); ++i) {
+        req = route_query_input("GET", bad_cgis[i], NULL);
+        fn(&req, &resp);
+        assert(resp.status == 502 && !resp.chunked);
+        if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
+    }
+
+    /* Mid-body crash -> BODY_ERROR and child reaped */
+    make_script("cgi-bin/midcrash.sh",
+                "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\npart'\nexit 2\n", 0700);
+    req = route_query_input("GET", "/cgi-bin/midcrash.sh", NULL);
+    fn(&req, &resp);
+    assert(resp.status == 200 && resp.chunked);
+    struct http_slice chunk = {0};
+    assert(resp.body_provider.next_func(resp.body_provider.state, &chunk) == BODY_DATA);
+    assert(chunk.length == 4 && memcmp(chunk.data, "part", 4) == 0);
+    assert(resp.body_provider.next_func(resp.body_provider.state, &chunk) == BODY_ERROR);
+    resp.body_provider.cleanup_func(resp.body_provider.state);
+
+    /* Cleanup before EOF kills & reaps sleeping child (no zombie left) */
+    make_script("cgi-bin/sleepy.sh",
+                "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\nstart'\nsleep 30\n", 0700);
+    req = route_query_input("GET", "/cgi-bin/sleepy.sh", NULL);
+    fn(&req, &resp);
+    assert(resp.status == 200 && resp.chunked);
+    resp.body_provider.cleanup_func(resp.body_provider.state);
+    int wstatus = 0;
+    assert(waitpid(-1, &wstatus, WNOHANG) == -1 && errno == ECHILD);
+
+    unsetenv("ITER3_PARENT_SECRET");
+    assert(unlink("cgi-bin/sleepy.sh") == 0);
+    assert(unlink("cgi-bin/midcrash.sh") == 0);
+    assert(unlink("cgi-bin/bighdr.sh") == 0);
+    assert(unlink("cgi-bin/badexec.sh") == 0);
+    assert(unlink("cgi-bin/badstatus.sh") == 0);
+    assert(unlink("cgi-bin/empty.sh") == 0);
+    assert(unlink("cgi-bin/notype.sh") == 0);
+    assert(unlink("cgi-bin/status400.sh") == 0);
+    assert(unlink("cgi-bin/ok.sh") == 0);
+    assert(unlink("cgi-bin/fifo.sh") == 0);
+    assert(unlink("cgi-bin/siblink.sh") == 0);
+    assert(unlink("cgi-bin/outlink.sh") == 0);
+    assert(unlink("cgi-bin/sub/nested.sh") == 0);
+    assert(unlink("cgi-bin/nonexec.sh") == 0);
+    assert(unlink("cgi-bin-other/sib.sh") == 0);
+    assert(unlink("outside.sh") == 0);
+    assert(rmdir("cgi-bin-other") == 0);
+    assert(rmdir("cgi-bin/sub") == 0);
+    assert(rmdir("cgi-bin") == 0);
+    assert(fchdir(old_cwd) == 0);
+    assert(close(old_cwd) == 0);
+    assert(rmdir(temp) == 0);
+}
+
 int main(void) {
     valid_request();
     basic_statuses();
@@ -406,6 +737,10 @@ int main(void) {
     static_file_responses();
     file_provider_chunks_and_early_eof();
     memory_provider_contract();
+    query_separation();
+    dynamic_route_selection();
+    dynamic_greet_responses();
+    cgi_responses_and_boundaries();
     puts("[PASS] test_http_parser");
     return 0;
 }

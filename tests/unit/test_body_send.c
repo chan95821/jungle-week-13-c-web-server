@@ -170,11 +170,158 @@ static void test_response_cleanup(void) {
     }
 }
 
+struct chunked_multi_body {
+    const char *pieces[2];
+    int index;
+    int cleanups;
+    unsigned char shared_buf[8];
+};
+
+static enum body_result chunked_multi_next(void *state, struct http_slice *chunk) {
+    struct chunked_multi_body *body = state;
+    if (body->index >= 2) return BODY_END;
+    const char *src = body->pieces[body->index++];
+    size_t len = strlen(src);
+    memcpy(body->shared_buf, src, len);
+    chunk->data = body->shared_buf;
+    chunk->length = len;
+    return BODY_DATA;
+}
+
+static void chunked_multi_cleanup(void *state) {
+    struct chunked_multi_body *body = state;
+    body->cleanups++;
+}
+
+static void test_chunked_streaming_and_failures(void) {
+    int sv[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    struct chunked_multi_body multi = {.pieces = {"ab", "cde"}};
+    struct router_response ok_resp = {
+        .status = 200,
+        .content_type = "text/html; charset=utf-8",
+        .chunked = true,
+        .body_provider = {
+            .next_func = chunked_multi_next,
+            .cleanup_func = chunked_multi_cleanup,
+            .state = &multi
+        }
+    };
+    assert(send_prepared_response(sv[0], &ok_resp, false, NULL) == 0);
+    assert(multi.cleanups == 1);
+    assert(shutdown(sv[0], SHUT_WR) == 0);
+    char wire[512];
+    size_t used = 0;
+    ssize_t n;
+    while ((n = recv(sv[1], wire + used, sizeof(wire) - 1 - used, 0)) > 0)
+        used += (size_t)n;
+    assert(n == 0);
+    wire[used] = '\0';
+    assert(strstr(wire, "Transfer-Encoding: chunked\r\n") != NULL);
+    assert(strstr(wire, "Content-Length:") == NULL);
+    const char *body_start = strstr(wire, "\r\n\r\n");
+    assert(body_start != NULL);
+    body_start += 4;
+    assert(strcmp(body_start, "2\r\nab\r\n3\r\ncde\r\n0\r\n\r\n") == 0);
+    close(sv[0]);
+    close(sv[1]);
+
+    /* Empty chunked stream still emits terminating 0\r\n\r\n on BODY_END. */
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    struct test_body empty_body = {BODY_END, NULL, 0, 0, 0};
+    struct router_response empty_resp = {
+        .status = 200, .content_type = "text/plain", .chunked = true,
+        .body_provider = {.next_func = test_next, .cleanup_func = NULL, .state = &empty_body}
+    };
+    assert(send_prepared_response(sv[0], &empty_resp, false, NULL) == 0);
+    assert(empty_body.calls == 1);
+    assert(shutdown(sv[0], SHUT_WR) == 0);
+    used = 0;
+    while ((n = recv(sv[1], wire + used, sizeof(wire) - 1 - used, 0)) > 0)
+        used += (size_t)n;
+    wire[used] = '\0';
+    body_start = strstr(wire, "\r\n\r\n");
+    assert(body_start != NULL && strcmp(body_start + 4, "0\r\n\r\n") == 0);
+    close(sv[0]);
+    close(sv[1]);
+
+    /* Provider errors / invalid chunks must NOT emit terminating 0\r\n\r\n. */
+    static const unsigned char sample[] = "abc";
+    struct {
+        enum body_result result;
+        const unsigned char *data;
+        size_t len;
+        int error;
+    } bad_cases[] = {
+        {BODY_ERROR, NULL, 0, 0},
+        {BODY_ERROR, NULL, 0, ENOSPC},
+        {BODY_DATA, NULL, 2, 0},
+        {BODY_DATA, sample, 0, 0},
+    };
+    for (size_t i = 0; i < sizeof(bad_cases) / sizeof(bad_cases[0]); ++i) {
+        assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+        struct response_test_body body = {
+            .result = bad_cases[i].result, .data = bad_cases[i].data,
+            .length = bad_cases[i].len
+        };
+        struct router_response fail_resp = {
+            .status = 200, .content_type = "text/plain", .chunked = true,
+            .body_provider = {
+                .next_func = response_test_next,
+                .cleanup_func = response_test_cleanup,
+                .state = &body
+            }
+        };
+        errno = 0;
+        assert(send_prepared_response(sv[0], &fail_resp, false, NULL) == -1);
+        assert(errno != EDOM);
+        assert(body.cleanups == 1);
+        assert(shutdown(sv[0], SHUT_WR) == 0);
+        used = 0;
+        while ((n = recv(sv[1], wire + used, sizeof(wire) - 1 - used, 0)) > 0)
+            used += (size_t)n;
+        wire[used] = '\0';
+        body_start = strstr(wire, "\r\n\r\n");
+        assert(body_start != NULL);
+        assert(strcmp(body_start + 4, "") == 0);
+        close(sv[0]);
+        close(sv[1]);
+    }
+
+    /* Chunked early peer close before header and during body preserves errno and cleans up once. */
+    for (int mode = 0; mode < 2; ++mode) {
+        assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+        struct response_test_body body = {
+            .result = BODY_DATA, .data = sample, .length = 3,
+            .peer = sv[1], .close_peer = (mode == 1)
+        };
+        if (mode == 0) {
+            close(sv[1]);
+            body.peer = -1;
+        }
+        struct router_response close_resp = {
+            .status = 200, .content_type = "text/plain", .chunked = true,
+            .body_provider = {
+                .next_func = response_test_next,
+                .cleanup_func = response_test_cleanup,
+                .state = &body
+            }
+        };
+        errno = 0;
+        assert(send_prepared_response(sv[0], &close_resp, false, NULL) == -1);
+        assert(errno != EDOM);
+        assert(body.cleanups == 1);
+        assert(body.calls == mode);
+        close(sv[0]);
+    }
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
     test_provider_failures();
     test_length_and_send_failure();
     test_response_cleanup();
+    test_chunked_streaming_and_failures();
     puts("[PASS] test_body_send");
     return 0;
 }
