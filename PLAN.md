@@ -140,3 +140,15 @@
 WSL에서 make all test_parse_port test_recv_header test_send_all test_http_parser를 실행해 서버(-O2)와 네 개 테스트(sanitizer 옵션)의 컴파일·링크에 성공했다. 테스트 바이너리는 실행하지 않았다. Python AST 구문 확인 성공. make -n test verify는 새 경로를 사용하며 실제 검증은 실행하지 않았다. Git diff --check는 공백 오류 없이 통과했고 LF/CRLF 경고만 있었다.
 build/server·build/obj/main.o·build/test_send_all·build/legacy/webserver가 무시됨을 확인했다. server 및 세 기존 테스트 바이너리를 인덱스에서 제거했으며, 알려진 산출물은 더 이상 추적되지 않는다. 프로젝트 루트·src·tests/unit·scripts에서 ELF/객체 파일이 남아 있지 않음을 확인했다. 기존 webserver는 build/legacy에 보관했다. 커밋·푸시하지 않았고 다른 기존 staged 변경은 유지했다.
 공식 기능 검증(라우팅/Allow·Hello/echo·오류 회귀), 반복·병렬/clean 후 재빌드 검증 및 성능 측정은 미실행이다.
+
+## Iteration 3 사용자 확정 (2026-11-23)
+
+- 대상은 `iteration3/jaeseong`. 사용자가 `/static/ 아래에서 제공 — 기존 경로 유지`와 `추천 구성으로 진행`을 선택했다.
+- `/`, `/hello`, `/echo`의 기존 동작은 유지한다. `/static/`은 루트의 index.html, 그 아래 경로는 루트 상대 파일이다. 하위 디렉터리 목록/자동 인덱스는 제공하지 않는다.
+- 실행은 `./build/server <port> [document-root]`. 명시한 루트를 사용하고 생략 시 샘플 `./public`을 사용해 기존 포트-only 호출을 유지한다. 루트 열기 실패는 시작 실패다.
+- 경로는 한 번만 디코딩하며 잘못된 인코딩/NUL/제어 문자/역슬래시는 400, 점 경로 요소·심볼릭 링크·디렉터리·비일반 파일·권한 거부는 403, 파일 없음은 404, 내부 실패는 500이다.
+- 루트 디렉터리 FD를 기준으로 각 구성 요소를 openat/O_NOFOLLOW로 열어 중간 심볼릭 링크도 거부한다. 파일을 열고 fstat한 같은 FD로 읽는다.
+- 고정 크기 버퍼로 읽고 기존 종료 표시·송신 제한을 적용하는 전송 함수를 사용한다. 요청 본문 64KiB 상한을 응답 파일에 적용하지 않는다.
+- 파일 FD는 handle_client, 루트 FD는 main이 소유한다. 정적 응답 헤더 전 파일을 준비하고, 본문 수신 정책과 100 Continue/연결 종료 정책은 유지한다.
+- Range/조건부 캐시/압축/HEAD 지원/동시성/성능 계측은 추가하지 않는다.
+- 사용자는 구현과 HTML/CSS/이미지 및 403·404 검증 완성을 요청했다. 기존 검증 보류를 일괄 해제하지 않으며, 구현 후 이번 단계의 구체적 검증 범위·환경을 제시해 확인한다.

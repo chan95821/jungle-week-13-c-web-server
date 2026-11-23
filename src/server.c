@@ -1,10 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
 #include "router.h"
+#include "static_file.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <netinet/in.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -162,9 +164,11 @@ int open_listenfd(uint16_t port) {
     return fd;
 }
 
-static int send_response(int fd, int status, const char *type,
-                         const void *body, size_t length, const char *allow,
-                         bool head_request, const struct io_context *io) {
+/* 메모리 응답과 파일 응답이 공통으로 사용하는 헤더 작성/전송 함수다.
+ * 파일 크기는 off_t에서 uintmax_t로 전달해 size_t로 조용히 잘리지 않게 한다. */
+static int send_response_header(int fd, int status, const char *type,
+                                uintmax_t length, const char *allow,
+                                bool head_request, const struct io_context *io) {
     char header[512];
     char allow_line[32] = "";
     if (allow) {
@@ -179,13 +183,45 @@ static int send_response(int fd, int status, const char *type,
                          status, http_reason(status), type, allow_line);
     } else {
         count = snprintf(header, sizeof(header),
-                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %" PRIuMAX "\r\n"
                          "%sConnection: close\r\n\r\n",
                          status, http_reason(status), type, length, allow_line);
     }
     if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
-    if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
+    return send_bytes(fd, header, (size_t)count, io);
+}
+
+static int send_response(int fd, int status, const char *type,
+                         const void *body, size_t length, const char *allow,
+                         bool head_request, const struct io_context *io) {
+    if (send_response_header(fd, status, type, (uintmax_t)length, allow, head_request, io) < 0) return -1;
     return head_request ? 0 : send_bytes(fd, body, length, io);
+}
+
+static int send_file_body(int connfd, const struct static_file *file,
+                          const struct io_context *io) {
+    /* 파일 전체 malloc 대신 16KiB 버퍼 하나를 반복 사용한다.
+     * read가 적게 읽거나 send가 적게 보냈어도 각 실제 길이만 진행시킨다.
+     * 전송 크기는 요청 본문 64KiB 상한과 관계없다. */
+    unsigned char buffer[16 * 1024];
+    uintmax_t remaining = file->length;
+    while (remaining > 0) {
+        if (!active(io)) { errno = ECANCELED; return -1; }
+        size_t wanted = remaining < sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
+        ssize_t count = read(file->fd, buffer, wanted);
+        if (count < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (count == 0) { errno = EIO; return -1; }
+        /* 송신 타임아웃과 종료 표시를 유지하는 기존 send_bytes를 재사용한다.
+         * 이미 200 헤더를 보냈으므로 여기서 실패하면 새 500을 붙이지 않고 종료한다. */
+        if (send_bytes(connfd, buffer, (size_t)count, io) < 0) return -1;
+        remaining -= (uintmax_t)count;
+    }
+    /* 전송 도중 파일이 커져도 처음 선언한 Content-Length 뒤의 바이트는 보내지 않는다.
+     * 파일 내용이 제자리에서 수정되는 상황까지 스냅샷 일관성을 보장하지는 않는다. */
+    return 0;
 }
 
 static void finish_response(int fd, const struct io_context *io) {
@@ -206,10 +242,11 @@ static void finish_response(int fd, const struct io_context *io) {
 }
 
 void handle_client(int connfd, const volatile sig_atomic_t *running,
-                   const struct timespec *accepted_at) {
+                   const struct timespec *accepted_at, int rootfd) {
     unsigned char header[REQ_HEADER_MAX_BYTES];
     unsigned char *body = NULL;
     struct http_request request = {0};
+    struct static_file file = {.fd = -1};
     enum http_route route = HTTP_ROUTE_HELLO;
     const char *allow = NULL;
     size_t received = 0, header_end = 0, body_received = 0;
@@ -245,6 +282,13 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     if (status) goto respond;
     status = http_route_request(&request, &route, &allow);
     if (status) goto respond;
+    /* 파일 확인은 최종 200 헤더 및 100 Continue 전에 한다.
+     * 없는 파일/금지 경로라면 본문을 더 보내도록 요구하지 않고 오류로 응답한다.
+     * 성공한 GET도 선언한 요청 본문이 있으면 기존 정책대로 끝까지 수신한다. */
+    if (route == HTTP_ROUTE_STATIC) {
+        status = prepare_static_file(rootfd, request.path, &file);
+        if (status) goto respond;
+    }
 
     if (request.content_length) {
         body = malloc(request.content_length);
@@ -278,17 +322,28 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
 
 respond:
     if (active(&output)) {
-        struct router_response response =
-            router_prepare_response(&request, route, status, allow);
-        if (send_response(connfd, response.status, response.content_type,
-                          response.body, response.length, response.allow,
-                          head_request, &output) == 0) {
+        int sent;
+        if (status == 200 && route == HTTP_ROUTE_STATIC) {
+            sent = send_response_header(connfd, 200, file.content_type,
+                                        file.length, NULL, false, &output);
+            if (sent == 0) sent = send_file_body(connfd, &file, &output);
+        } else {
+            struct router_response response =
+                router_prepare_response(&request, route, status, allow);
+            sent = send_response(connfd, response.status, response.content_type,
+                                 response.body, response.length, response.allow,
+                                 head_request, &output);
+        }
+        if (sent == 0) {
             finish_response(connfd, &output);
         } else if (active(&output)) {
             perror("send response");
         }
     }
 cleanup:
+    /* 파일 FD는 여기서만 닫고, 루트 FD는 main에 빌렸으므로 닫지 않는다.
+     * 파싱 실패·본문 미완성·전송 실패·종료 시그널도 모두 이 경로로 모인다. */
+    if (file.fd >= 0 && close(file.fd) < 0) perror("close static file");
     /* Sole owner of body storage; input/output helpers never release it. */
     free(body);
 }

@@ -1,4 +1,5 @@
 #include "router.h"
+#include "static_file.h"
 
 #include <string.h>
 
@@ -16,6 +17,14 @@ int http_route_request(const struct http_request *r,
     if (http_slice_equal(r->path, "/echo")) {
         if (!post) { *allow = "POST"; return 405; }
         *route = HTTP_ROUTE_ECHO;
+        return 0;
+    }
+    /* 라우터는 어떤 처리인지 판정만 한다. 파일 존재/권한 확인은 파일 I/O 계층에
+     * 맡겨서 순수 파싱·라우팅 테스트가 파일시스템에 의존하지 않게 한다. */
+    const size_t prefix = sizeof(STATIC_URL_PREFIX) - 1;
+    if (r->path.length >= prefix && memcmp(r->path.data, STATIC_URL_PREFIX, prefix) == 0) {
+        if (!get) { *allow = "GET"; return 405; }
+        *route = HTTP_ROUTE_STATIC;
         return 0;
     }
     return 404;

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
+#include "static_file.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -27,8 +28,8 @@ static int setup_signals(void) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "Usage: %s <port> [document-root]\n", argv[0]);
         return 1;
     }
     uint16_t port;
@@ -37,8 +38,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     if (setup_signals() < 0) { perror("sigaction"); return 1; }
+    /* 文書ルートはサーバ起動時に一度だけ開く。各接続にFDを貸し、終了時にmainが閉じる。
+     * 指定省略時はpublicを使い、既存のポートだけの起動方法を維持する。 */
+    const char *document_root = argc == 3 ? argv[2] : "public";
+    int rootfd = open_static_root(document_root);
+    if (rootfd < 0) { perror("document root"); return 1; }
     int listenfd = open_listenfd(port);
-    if (listenfd < 0) return 1;
+    if (listenfd < 0) { close(rootfd); return 1; }
 
     int exit_status = 0;
     while (g_running) {
@@ -57,10 +63,11 @@ int main(int argc, char *argv[]) {
             exit_status = 1;
             break;
         }
-        if (g_running) handle_client(connfd, &g_running, &accepted_at);
+        if (g_running) handle_client(connfd, &g_running, &accepted_at, rootfd);
         /* Linux: do not retry close after EINTR; the FD may be released. */
         if (close(connfd) < 0) perror("close client");
     }
     if (close(listenfd) < 0) { perror("close listener"); exit_status = 1; }
+    if (close(rootfd) < 0) { perror("close document root"); exit_status = 1; }
     return exit_status;
 }
