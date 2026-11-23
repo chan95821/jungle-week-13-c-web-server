@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -19,10 +20,12 @@ struct io_context {
     const struct timespec *deadline;
 };
 
+/* Check whether server shutdown has not been requested. */
 static bool active(const struct io_context *io) {
     return !io || !io->running || *io->running != 0;
 }
 
+/* Return true when monotonic clock has reached or passed deadline. */
 static bool deadline_passed(const struct timespec *now, const struct timespec *deadline) {
     return now->tv_sec > deadline->tv_sec ||
            (now->tv_sec == deadline->tv_sec && now->tv_nsec >= deadline->tv_nsec);
@@ -32,14 +35,17 @@ static bool deadline_passed(const struct timespec *now, const struct timespec *d
 static int set_call_timeout(int fd, int option, const struct io_context *io) {
     if (!io) return 0;
     if (!active(io)) { errno = ECANCELED; return -1; }
+
     struct timeval timeout = {.tv_sec = IO_CALL_TIMEOUT_SECONDS, .tv_usec = 0};
     if (io->deadline) {
         struct timespec now;
         if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
         if (deadline_passed(&now, io->deadline)) { errno = ETIMEDOUT; return -1; }
+
         time_t seconds = io->deadline->tv_sec - now.tv_sec;
         long nanoseconds = io->deadline->tv_nsec - now.tv_nsec;
         if (nanoseconds < 0) { --seconds; nanoseconds += 1000000000L; }
+
         if (seconds < IO_CALL_TIMEOUT_SECONDS) {
             timeout.tv_sec = seconds;
             timeout.tv_usec = (nanoseconds + 999L) / 1000L;
@@ -49,13 +55,16 @@ static int set_call_timeout(int fd, int option, const struct io_context *io) {
             }
         }
     }
+
     return setsockopt(fd, SOL_SOCKET, option, &timeout, sizeof(timeout));
 }
 
+/* Identify socket timeout errors across SO_RCVTIMEO/SO_SNDTIMEO implementations. */
 static bool timed_out(void) {
     return errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
+/* Receive up to len bytes while honoring io cancellation, EINTR, and deadline. */
 static ssize_t receive_some(int fd, void *buf, size_t len, const struct io_context *io) {
     for (;;) {
         if (set_call_timeout(fd, SO_RCVTIMEO, io) < 0) return -1;
@@ -71,13 +80,16 @@ static ssize_t receive_some(int fd, void *buf, size_t len, const struct io_conte
     }
 }
 
+/* Send all len bytes, retrying short writes and EINTR. Return 0 or -1. */
 static int send_bytes(int fd, const void *buf, size_t len, const struct io_context *io) {
     if (len == 0) return 0;
     if (!buf) { errno = EINVAL; return -1; }
+
     const unsigned char *data = buf;
     size_t sent = 0;
     while (sent < len) {
         if (set_call_timeout(fd, SO_SNDTIMEO, io) < 0) return -1;
+
         ssize_t count = send(fd, data + sent, len - sent, 0);
         if (!active(io)) { errno = ECANCELED; return -1; }
         if (count < 0) {
@@ -87,6 +99,7 @@ static int send_bytes(int fd, const void *buf, size_t len, const struct io_conte
         if (count == 0) { errno = EIO; return -1; }
         sent += (size_t)count;
     }
+
     return 0;
 }
 
@@ -97,12 +110,14 @@ static int receive_header(int fd, unsigned char *buf, size_t cap,
     *received = 0;
     *header_end = 0;
     if (!buf || cap < 4) { errno = EINVAL; return -1; }
+
     while (*received < cap) {
         size_t previous = *received;
         ssize_t count = receive_some(fd, buf + previous, cap - previous, io);
         if (count < 0) return -1;
         if (count == 0) return 1;
         *received += (size_t)count;
+
         size_t start = previous > 3 ? previous - 3 : 0;
         for (size_t i = start; i + 4 <= *received; ++i) {
             if (memcmp(buf + i, "\r\n\r\n", 4) == 0) {
@@ -111,6 +126,7 @@ static int receive_header(int fd, unsigned char *buf, size_t cap,
             }
         }
     }
+
     errno = EMSGSIZE;
     return -1;
 }
@@ -136,9 +152,22 @@ int parse_port(const char *arg, uint16_t *out_port) {
     return 0;
 }
 
+/* Mark fd close-on-exec so socket FDs are never inherited by CGI children. */
+static int set_cloexec(int fd) {
+    int flags = fcntl(fd, F_GETFD);
+    if (flags < 0) return -1;
+    return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+}
+
 int open_listenfd(uint16_t port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) { perror("socket"); return -1; }
+    if (set_cloexec(fd) < 0) {
+        perror("listener cloexec");
+        close(fd);
+        return -1;
+    }
+
     const int enabled = 1;
     const struct timeval timeout = {.tv_sec = IO_CALL_TIMEOUT_SECONDS, .tv_usec = 0};
     /* Bound accept as well, so a pre-call shutdown signal cannot strand it. */
@@ -148,6 +177,7 @@ int open_listenfd(uint16_t port) {
         close(fd);
         return -1;
     }
+
     const struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port = htons(port),
@@ -159,11 +189,66 @@ int open_listenfd(uint16_t port) {
     if (listen(fd, LISTEN_BACKLOG) < 0) {
         perror("listen"); close(fd); return -1;
     }
+
     return fd;
 }
 
+/* Stream exactly length bytes from provider; fail with EIO on short/oversized/null chunks. */
+static int send_body(int fd, struct body_provider *provider, size_t length,
+                     const struct io_context *io) {
+    size_t remaining = length;
+    while (remaining > 0) {
+        struct http_slice chunk = {0};
+        errno = 0;
+        enum body_result result = provider->next_func(provider->state, &chunk);
+        if (result != BODY_DATA) {
+            if (result != BODY_ERROR || errno == 0) errno = EIO;
+            return -1;
+        }
+        if (!chunk.data || chunk.length == 0 || chunk.length > remaining) {
+            errno = EIO;
+            return -1;
+        }
+        if (send_bytes(fd, chunk.data, chunk.length, io) < 0) return -1;
+        remaining -= chunk.length;
+    }
+    return 0;
+}
+
+/* Stream HTTP/1.1 chunked frames; omit terminating 0-chunk on provider or send error. */
+static int send_chunked_body(int fd, struct body_provider *provider,
+                             const struct io_context *io) {
+    for (;;) {
+        struct http_slice chunk = {0};
+        errno = 0;
+        enum body_result result = provider->next_func(provider->state, &chunk);
+        if (result == BODY_END) return send_bytes(fd, "0\r\n\r\n", 5, io);
+        if (result != BODY_DATA) {
+            if (result != BODY_ERROR || errno == 0) errno = EIO;
+            return -1;
+        }
+        if (!chunk.data || chunk.length == 0) {
+            errno = EIO;
+            return -1;
+        }
+
+        char prefix[32];
+        int count = snprintf(prefix, sizeof(prefix), "%zx\r\n", chunk.length);
+        if (count < 0 || (size_t)count >= sizeof(prefix)) {
+            errno = EOVERFLOW;
+            return -1;
+        }
+
+        if (send_bytes(fd, prefix, (size_t)count, io) < 0) return -1;
+        if (send_bytes(fd, chunk.data, chunk.length, io) < 0) return -1;
+        if (send_bytes(fd, "\r\n", 2, io) < 0) return -1;
+    }
+}
+
+/* Format and send HTTP status line, headers, and fixed-length or chunked body. */
 static int send_response(int fd, int status, const char *type,
-                         const void *body, size_t length, const char *allow,
+                         struct body_provider *provider, size_t length,
+                         bool chunked, const char *allow,
                          bool head_request, const struct io_context *io) {
     char header[512];
     char allow_line[32] = "";
@@ -171,11 +256,17 @@ static int send_response(int fd, int status, const char *type,
         int count = snprintf(allow_line, sizeof(allow_line), "Allow: %s\r\n", allow);
         if (count < 0 || (size_t)count >= sizeof(allow_line)) { errno = EOVERFLOW; return -1; }
     }
+
     int count;
     if (head_request) {
         /* HEAD is unsupported (501), but must not carry response content. */
         count = snprintf(header, sizeof(header),
                          "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%sConnection: close\r\n\r\n",
+                         status, http_reason(status), type, allow_line);
+    } else if (chunked) {
+        count = snprintf(header, sizeof(header),
+                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nTransfer-Encoding: chunked\r\n"
+                         "%sConnection: close\r\n\r\n",
                          status, http_reason(status), type, allow_line);
     } else {
         count = snprintf(header, sizeof(header),
@@ -184,15 +275,36 @@ static int send_response(int fd, int status, const char *type,
                          status, http_reason(status), type, length, allow_line);
     }
     if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
+
     if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
-    return head_request ? 0 : send_bytes(fd, body, length, io);
+    if (head_request) return 0;
+
+    return chunked ? send_chunked_body(fd, provider, io)
+                   : send_body(fd, provider, length, io);
 }
 
+/* Takes responsibility for provider cleanup, including on send failure. */
+static int send_prepared_response(int fd, struct router_response *response,
+                                  bool head_request, const struct io_context *io) {
+    int result = send_response(fd, response->status, response->content_type,
+                               &response->body_provider, response->length,
+                               response->chunked, response->allow, head_request, io);
+    int send_errno = errno;
+
+    if (response->body_provider.cleanup_func)
+        response->body_provider.cleanup_func(response->body_provider.state);
+    if (result < 0) errno = send_errno;
+    return result;
+}
+
+/* Half-close write side and drain bounded leftover client input before closing. */
 static void finish_response(int fd, const struct io_context *io) {
     if (!active(io) || shutdown(fd, SHUT_WR) < 0) return;
+
     struct timespec deadline;
     if (clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) return;
     deadline.tv_sec += DRAIN_DEADLINE_SECONDS;
+
     struct io_context drain = {io->running, &deadline};
     unsigned char discard[1024];
     size_t discarded = 0;
@@ -210,7 +322,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     unsigned char header[REQ_HEADER_MAX_BYTES];
     unsigned char *body = NULL;
     struct http_request request = {0};
-    enum http_route route = HTTP_ROUTE_HELLO;
+    router_handler route_handler_func = NULL;
     const char *allow = NULL;
     size_t received = 0, header_end = 0, body_received = 0;
     bool head_request = false;
@@ -219,6 +331,11 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     struct io_context input = {running, &header_deadline};
     const struct io_context output = {running, NULL};
     int status = 0;
+
+    if (set_cloexec(connfd) < 0) {
+        perror("client cloexec");
+        goto cleanup;
+    }
 
     int result = receive_header(connfd, header, sizeof(header),
                                 &received, &header_end, &input);
@@ -234,16 +351,18 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
         else { perror("receive header"); goto cleanup; }
         goto respond;
     }
+
     struct timespec body_deadline;
     if (clock_gettime(CLOCK_MONOTONIC, &body_deadline) < 0) {
         status = 500;
         goto respond;
     }
     body_deadline.tv_sec += BODY_DEADLINE_SECONDS;
+
     status = http_parse_request(header, header_end, &request);
     head_request = http_slice_equal(request.method, "HEAD");
     if (status) goto respond;
-    status = http_route_request(&request, &route, &allow);
+    status = http_select_handler(&request, &route_handler_func, &allow);
     if (status) goto respond;
 
     if (request.content_length) {
@@ -253,6 +372,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
         if (body_received > request.content_length) body_received = request.content_length;
         memcpy(body, header + header_end, body_received);
     }
+
     if (request.expect_continue && body_received < request.content_length) {
         static const char interim[] = "HTTP/1.1 100 Continue\r\n\r\n";
         if (send_bytes(connfd, interim, sizeof(interim) - 1, &output) < 0) {
@@ -260,6 +380,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
             goto cleanup;
         }
     }
+
     input.deadline = &body_deadline;
     while (body_received < request.content_length) {
         ssize_t count = receive_some(connfd, body + body_received,
@@ -273,18 +394,22 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
         }
         body_received += (size_t)count;
     }
+
     request.body = (struct http_slice){body, body_received};
     status = 200;
 
 respond:
     if (active(&output)) {
-        struct router_response response =
-            router_prepare_response(&request, route, status, allow);
-        if (send_response(connfd, response.status, response.content_type,
-                          response.body, response.length, response.allow,
-                          head_request, &output) == 0) {
+        struct router_response response;
+        if (status == 200 && route_handler_func) route_handler_func(&request, &response);
+        else router_prepare_error(&response, status, allow);
+
+        int send_result = send_prepared_response(connfd, &response, head_request, &output);
+        int send_errno = errno;
+        if (send_result == 0) {
             finish_response(connfd, &output);
         } else if (active(&output)) {
+            errno = send_errno;
             perror("send response");
         }
     }

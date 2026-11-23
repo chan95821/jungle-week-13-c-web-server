@@ -17,10 +17,13 @@ enum {
     DRAIN_MAX_BYTES = 64 * 1024
 };
 
+/* Parse decimal TCP port in 1..65535. Return 0 on success, -1 otherwise. */
 int parse_port(const char *arg, uint16_t *out_port);
+/* Create, bind, and listen on IPv4 port with FD_CLOEXEC and SO_REUSEADDR. Return fd or -1. */
 int open_listenfd(uint16_t port);
 /* Legacy framing contract: out_len includes any body bytes already received. */
 int recv_until_header_end(int fd, char *buf, size_t cap, size_t *out_len);
+/* Send the entire buffer reliably without an io_context deadline. Return 0 or -1. */
 int send_all(int fd, const void *buf, size_t len);
 /* Borrow the FD and cancellation flag. Main closes the FD exactly once. */
 void handle_client(int connfd, const volatile sig_atomic_t *running,
