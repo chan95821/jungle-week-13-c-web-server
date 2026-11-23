@@ -38,8 +38,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     if (setup_signals() < 0) { perror("sigaction"); return 1; }
-    /* 文書ルートはサーバ起動時に一度だけ開く。各接続にFDを貸し、終了時にmainが閉じる。
-     * 指定省略時はpublicを使い、既存のポートだけの起動方法を維持する。 */
+    /* 문서 루트는 시작 시 한 번 열고 각 연결에 빌려준다. 종료 시 main이 닫는다.
+     * 생략하면 public을 사용해 기존 포트만 받는 실행 방법도 유지한다. */
     const char *document_root = argc == 3 ? argv[2] : "public";
     int rootfd = open_static_root(document_root);
     if (rootfd < 0) { perror("document root"); return 1; }

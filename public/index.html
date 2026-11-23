@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C 웹 서버 · 정적 파일 확인</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <main>
+    <img src="/static/images/jungle.svg" alt="초록색 잎 아이콘" width="96" height="96">
+    <p class="label">C · POSIX HTTP SERVER</p>
+    <h1>정적 파일 서빙</h1>
+    <p>이 페이지의 HTML, 스타일, 이미지는 각각 별도의 HTTP 요청으로 가져옵니다.</p>
+    <ul>
+      <li><a href="/static/index.html">HTML 파일</a></li>
+      <li><a href="/static/css/style.css">CSS 파일</a></li>
+      <li><a href="/static/images/jungle.svg">이미지 파일</a></li>
+      <li><a href="/static/not-found.html">없는 파일: 404</a></li>
+      <li><a href="/static/images/">디렉터리 목록 거부: 403</a></li>
+      <li><a href="/hello">기존 /hello: Hello</a></li>
+    </ul>
+  </main>
+</body>
+</html>
