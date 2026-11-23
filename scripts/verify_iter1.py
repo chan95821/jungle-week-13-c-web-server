@@ -6,7 +6,8 @@ import subprocess
 import sys
 import time
 
-SERVER_BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "server")
+SERVER_BIN = os.environ.get("SERVER_BIN", os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "server"))
 EXPECTED_RESP = (
     b"HTTP/1.1 200 OK\r\n"
     b"Content-Type: text/plain\r\n"

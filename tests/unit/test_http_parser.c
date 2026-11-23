@@ -79,9 +79,9 @@ static void routes(void) {
         {"POST", "/echo", 0, NULL}, {"GET", "/echo", 405, "POST"},
         {"POST", "/hello", 405, "GET"}, {"GET", "/missing", 404, NULL},
         {"GET", "/%68ello", 404, NULL}, {"GET", "/a/../hello", 404, NULL},
-        {"DELETE", "/hello", 501, NULL}
-        , {"GET", "/static/", 0, NULL}, {"GET", "/static/a.css?x=1", 0, NULL}
-        , {"POST", "/static/index.html", 405, "GET"}, {"GET", "/static", 404, NULL}
+        {"DELETE", "/hello", 501, NULL},
+        {"GET", "/static/", 0, NULL}, {"GET", "/static/a.css?x=1", 0, NULL},
+        {"POST", "/static/index.html", 405, "GET"}, {"GET", "/static", 404, NULL}
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         char wire[256];

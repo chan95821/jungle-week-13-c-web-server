@@ -24,7 +24,7 @@ static void write_file(int root, const char *name, const void *data, size_t leng
 static void expect_file(int root, const char *url, int expected,
                          const char *type, const void *bytes, size_t length) {
     struct static_file file;
-    /* 入力の非NUL終端契約と不変性も確かめるため、末尾を別の文字で埋める。 */
+    /* 입력의 NUL 종료를 가정하지 않고 원본도 바꾸지 않는지 확인한다. */
     unsigned char input[512];
     size_t url_length = strlen(url);
     assert(url_length < sizeof(input));
