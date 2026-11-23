@@ -152,3 +152,4 @@ build/server·build/obj/main.o·build/test_send_all·build/legacy/webserver가 �
 - 파일 FD는 handle_client, 루트 FD는 main이 소유한다. 정적 응답 헤더 전 파일을 준비하고, 본문 수신 정책과 100 Continue/연결 종료 정책은 유지한다.
 - Range/조건부 캐시/압축/HEAD 지원/동시성/성능 계측은 추가하지 않는다.
 - 사용자는 구현과 HTML/CSS/이미지 및 403·404 검증 완성을 요청했다. 기존 검증 보류를 일괄 해제하지 않으며, 구현 후 이번 단계의 구체적 검증 범위·환경을 제시해 확인한다.
+- 최종 검증 지시: `정적 파일 기본 기능만 검증. 더 나가지마`. HTML/CSS/SVG/PNG의 200·MIME·길이·바이트 일치와 읽기 권한 거부 403·파일 없음 404만 실행한다. 기존 회귀, 단위 실행, sanitizer 실행, 오류 주입·성능 측정은 실행하지 않는다. Ubuntu WSL 장애로 제안한 Docker 사용 여부는 답변 대기다.

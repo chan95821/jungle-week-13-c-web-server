@@ -13,7 +13,7 @@ OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 HEADERS = src/server.h src/http.h src/router.h src/static_file.h
 TEST_SRCS = src/server.c src/http.c src/router.c src/static_file.c
 
-.PHONY: all test verify clean server $(TEST_NAMES)
+.PHONY: all test verify verify-static clean server $(TEST_NAMES)
 
 all: $(TARGET)
 
@@ -39,6 +39,10 @@ $(BUILD_DIR)/test_%: tests/unit/test_%.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 verify: $(TARGET)
 	python3 scripts/verify_iter1.py
 	python3 scripts/verify_iter2.py
+	python3 scripts/verify_iter3.py
+
+# 정적 파일 기본 기능만 확인한다. 기존 회귀와 단위 테스트는 실행하지 않는다.
+verify-static: $(TARGET)
 	python3 scripts/verify_iter3.py
 
 clean:

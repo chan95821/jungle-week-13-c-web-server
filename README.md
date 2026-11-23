@@ -101,6 +101,17 @@ application/octet-stream이다. 텍스트 샘플은 UTF-8이다. 오류 응답�
 
 ## 검증 상태와 명령
 
+3단계에서 사용자가 확정한 실행 범위는 HTML/CSS/SVG/PNG 정상 응답과 MIME·길이·바이트
+일치, 읽기 권한 거부 403, 없는 파일 404뿐이다. 해당 범위만 실행하는 명령은 다음과 같다.
+
+```sh
+make verify-static
+```
+
+현재 3단계 소스의 기능 검증은 실행 전이다. Ubuntu WSL의 디스크 파일 오류가 확인됐고,
+대체 Docker 환경 사용 여부는 답변 대기다. 아래 컴파일 기록은 기존 2단계 이력이며
+새 정적 파일 코드의 빌드·검증 성공을 뜻하지 않는다.
+
 - 서버: 현재 Makefile의 -std=c11 -Wall -Wextra -Werror -O2로 컴파일 성공.
 - 네 개 단위 테스트 바이너리: -fsanitize=address,undefined로 컴파일 성공. 실행하지 않았으므로 sanitizer 검사 통과를 의미하지 않는다.
 - 두 E2E 스크립트: Python 구문 컴파일 성공. 실행하지 않았다.
