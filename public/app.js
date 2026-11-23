@@ -1,0 +1,1 @@
+document.getElementById("message").textContent = "HTML, CSS and JavaScript were served from the document root.";

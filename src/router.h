@@ -1,16 +1,21 @@
 #ifndef ROUTER_H
 #define ROUTER_H
 
+#include <stdint.h>
 #include "http.h"
 
-enum http_route { HTTP_ROUTE_HELLO, HTTP_ROUTE_ECHO };
+enum http_route { HTTP_ROUTE_HELLO, HTTP_ROUTE_ECHO, HTTP_ROUTE_STATIC, HTTP_ROUTE_GREET };
 
-/* Borrows body storage owned by handle_client or a static literal. */
+enum router_body_kind { ROUTER_BODY_MEMORY, ROUTER_BODY_FILE };
+
+/* Borrows body storage or a file FD. Handle_client owns their lifetime. */
 struct router_response {
     int status;
     const char *content_type;
     const void *body;
-    size_t length;
+    uintmax_t length;
+    enum router_body_kind kind;
+    int file_fd;
     const char *allow;
 };
 

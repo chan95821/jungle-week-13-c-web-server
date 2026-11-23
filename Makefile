@@ -5,13 +5,13 @@ ASAN_FLAGS = -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined
 BUILD_DIR = build
 OBJ_DIR = $(BUILD_DIR)/obj
 TARGET = $(BUILD_DIR)/server
-TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser
+TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_static test_greet test_file_stream
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
-SRCS = src/main.c src/server.c src/http.c src/router.c
+SRCS = src/main.c src/server.c src/http.c src/router.c src/static.c src/greet.c
 OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
-HEADERS = src/server.h src/http.h src/router.h
-TEST_SRCS = src/server.c src/http.c src/router.c
+HEADERS = src/server.h src/http.h src/router.h src/static.h src/greet.h
+TEST_SRCS = src/server.c src/http.c src/router.c src/static.c src/greet.c
 
 .PHONY: all test verify clean server $(TEST_NAMES)
 
@@ -36,9 +36,13 @@ test: $(TEST_BINS)
 $(BUILD_DIR)/test_%: tests/unit/test_%.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< $(TEST_SRCS)
 
+# The file-stream test includes server.c to replace I/O only within its own TU.
+$(BUILD_DIR)/test_file_stream: tests/unit/test_file_stream.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
+	$(CC) $(ASAN_FLAGS) -o $@ $< $(filter-out src/server.c,$(TEST_SRCS))
 verify: $(TARGET)
 	python3 scripts/verify_iter1.py
 	python3 scripts/verify_iter2.py
+	python3 scripts/verify_iter3.py
 
 clean:
 	rm -f $(OBJS) $(TARGET) $(TEST_BINS)

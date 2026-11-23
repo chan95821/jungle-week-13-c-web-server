@@ -73,3 +73,10 @@
 
 ## 2026-11-21 경로·구조 변경
 이전 ./server 및 src/*.o 기록은 당시 경로다. 현재는 ./build/server, build/obj/*.o, build/test_*를 사용한다. 라우팅과 응답 내용 선택은 src/router.c로 분리했으며 현재 프로토콜·오류·본문 정책은 유지한다. 기존 바이너리는 Git 추적에서 제외한다. 이번 변경의 확인은 컴파일·링크와 산출물/Git 경로 검사까지이며 공식 기능 검증·성능 측정은 별도 확정 전까지 보류한다.
+## 2026-11-23 Iteration 3 구현 체크포인트
+실행은 ./build/server <port> <document-root>로 변경되었다. 기존 E2E fixture는 임시 루트를 명시적으로 전달한다. 최신 추천 공식 검증 범위·목적·기준·제외 항목은 docs/iteration-3/Snoopykid/iteration-3-tests.md를 따른다. 서버/일곱 단위 테스트의 컴파일·링크 및 세 E2E 구문 확인만 성공했으며 실행은 보류 중이다. 인코딩/제어문자 범위 확대 여부는 사용자 재선택 대상이다.
+## 2026-11-23 공식 기본 검증 실행 결과
+사용자가 현재 UTF-8/제어문자 기준 유지와 단위 7개·E2E 3개 실행을 허락했다. 파일 내용/권한 변경은 테스트 전용 임시 fixture로 제한했다.
+make test의 7개와 make verify의 3개 스크립트 모두 통과. 실패 0, skip 0. 단위 ASan/UBSan 실행에서 오류 보고 없음. E2E는 -O2 서버다. 종료 후 잔여 server 프로세스 없음.
+실제 정적 루트·운영 권한은 변경하지 않았고 실제 권한/ACL 계약 충족은 미검증이다. 광범위한 조합/장애·브라우저 이미지 렌더링·성능은 미검증이다. 정책 변경·성능 측정·커밋/푸시는 하지 않았다.
+상세: docs/iteration-3/Snoopykid/iteration-3-verification-results.md. 로그: build/iteration3-unit.log 및 build/iteration3-e2e.log.

@@ -9,6 +9,7 @@
 
 /* Provisional policy constants; each can be reconsidered independently. */
 enum {
+    FILE_SEND_BUFFER_BYTES = 16 * 1024,
     LISTEN_BACKLOG = 128,
     IO_CALL_TIMEOUT_SECONDS = 5,
     HEADER_DEADLINE_SECONDS = 7,
@@ -24,6 +25,6 @@ int recv_until_header_end(int fd, char *buf, size_t cap, size_t *out_len);
 int send_all(int fd, const void *buf, size_t len);
 /* Borrow the FD and cancellation flag. Main closes the FD exactly once. */
 void handle_client(int connfd, const volatile sig_atomic_t *running,
-                   const struct timespec *accepted_at);
+                   const struct timespec *accepted_at, int rootfd);
 
 #endif

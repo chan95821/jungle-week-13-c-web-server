@@ -18,6 +18,16 @@ int http_route_request(const struct http_request *r,
         *route = HTTP_ROUTE_ECHO;
         return 0;
     }
+    if (http_slice_equal(r->path, "/greet")) {
+        if (!get) { *allow = "GET"; return 405; }
+        *route = HTTP_ROUTE_GREET;
+        return 0;
+    }
+    if (r->path.length >= 8 && memcmp(r->path.data, "/static/", 8) == 0) {
+        if (!get) { *allow = "GET"; return 405; }
+        *route = HTTP_ROUTE_STATIC;
+        return 0;
+    }
     return 404;
 }
 
@@ -26,6 +36,8 @@ struct router_response router_prepare_response(const struct http_request *reques
                                                const char *allow) {
     const char *reason = http_reason(status);
     struct router_response response = {
+        .kind = ROUTER_BODY_MEMORY,
+        .file_fd = -1,
         .status = status,
         .content_type = "text/plain",
         .body = reason,

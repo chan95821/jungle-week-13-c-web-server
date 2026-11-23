@@ -1,6 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
 #include "router.h"
+#include "static.h"
+#include "greet.h"
+#include <inttypes.h>
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -162,32 +165,54 @@ int open_listenfd(uint16_t port) {
     return fd;
 }
 
-static int send_response(int fd, int status, const char *type,
-                         const void *body, size_t length, const char *allow,
+static int send_file_body(int connfd, int filefd, uintmax_t remaining,
+                          const struct io_context *io) {
+    unsigned char buffer[FILE_SEND_BUFFER_BYTES];
+    while (remaining) {
+        if (!active(io)) { errno = ECANCELED; return -1; }
+        size_t wanted = remaining < sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
+        ssize_t count = read(filefd, buffer, wanted);
+        if (count < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (count == 0) { errno = EIO; return -1; } /* Truncated after fstat. */
+        if (send_bytes(connfd, buffer, (size_t)count, io) < 0) return -1;
+        remaining -= (uintmax_t)count;
+    }
+    return 0;
+}
+
+static int send_response(int fd, const struct router_response *response,
                          bool head_request, const struct io_context *io) {
     char header[512];
     char allow_line[32] = "";
-    if (allow) {
-        int count = snprintf(allow_line, sizeof(allow_line), "Allow: %s\r\n", allow);
+    if (response->allow) {
+        int count = snprintf(allow_line, sizeof(allow_line), "Allow: %s\r\n", response->allow);
         if (count < 0 || (size_t)count >= sizeof(allow_line)) { errno = EOVERFLOW; return -1; }
     }
     int count;
     if (head_request) {
-        /* HEAD is unsupported (501), but must not carry response content. */
+        /* HEAD remains unsupported (501) and must not carry content. */
         count = snprintf(header, sizeof(header),
                          "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%sConnection: close\r\n\r\n",
-                         status, http_reason(status), type, allow_line);
+                         response->status, http_reason(response->status),
+                         response->content_type, allow_line);
     } else {
         count = snprintf(header, sizeof(header),
-                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %" PRIuMAX "\r\n"
                          "%sConnection: close\r\n\r\n",
-                         status, http_reason(status), type, length, allow_line);
+                         response->status, http_reason(response->status),
+                         response->content_type, response->length, allow_line);
     }
     if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
     if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
-    return head_request ? 0 : send_bytes(fd, body, length, io);
+    if (head_request) return 0;
+    if (response->kind == ROUTER_BODY_FILE)
+        return send_file_body(fd, response->file_fd, response->length, io);
+    if (response->length > SIZE_MAX) { errno = EOVERFLOW; return -1; }
+    return send_bytes(fd, response->body, (size_t)response->length, io);
 }
-
 static void finish_response(int fd, const struct io_context *io) {
     if (!active(io) || shutdown(fd, SHUT_WR) < 0) return;
     struct timespec deadline;
@@ -206,9 +231,11 @@ static void finish_response(int fd, const struct io_context *io) {
 }
 
 void handle_client(int connfd, const volatile sig_atomic_t *running,
-                   const struct timespec *accepted_at) {
+                   const struct timespec *accepted_at, int rootfd) {
     unsigned char header[REQ_HEADER_MAX_BYTES];
     unsigned char *body = NULL;
+    int filefd = -1;
+    unsigned char *generated_body = NULL;
     struct http_request request = {0};
     enum http_route route = HTTP_ROUTE_HELLO;
     const char *allow = NULL;
@@ -280,9 +307,20 @@ respond:
     if (active(&output)) {
         struct router_response response =
             router_prepare_response(&request, route, status, allow);
-        if (send_response(connfd, response.status, response.content_type,
-                          response.body, response.length, response.allow,
-                          head_request, &output) == 0) {
+        if (status == 200 && route == HTTP_ROUTE_GREET)
+            response = greet_prepare_response(&request, &generated_body);
+        if (status == 200 && route == HTTP_ROUTE_STATIC) {
+            int file_status = static_open_file(rootfd, request.path, &filefd,
+                                               &response.length, &response.content_type);
+            if (file_status) {
+                response = router_prepare_response(&request, route, file_status, NULL);
+            } else {
+                response.kind = ROUTER_BODY_FILE;
+                response.body = NULL;
+                response.file_fd = filefd;
+            }
+        }
+        if (send_response(connfd, &response, head_request, &output) == 0) {
             finish_response(connfd, &output);
         } else if (active(&output)) {
             perror("send response");
@@ -290,5 +328,7 @@ respond:
     }
 cleanup:
     /* Sole owner of body storage; input/output helpers never release it. */
+    if (filefd >= 0 && close(filefd) < 0) perror("close file");
+    free(generated_body);
     free(body);
 }

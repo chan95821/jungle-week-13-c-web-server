@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import time
+import tempfile
 
 SERVER_BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "server")
 EXPECTED_RESP = (
@@ -34,30 +35,42 @@ def wait_for_port(port: int, timeout: float = 3.0) -> None:
     raise RuntimeError(f"Server did not start on port {port}")
 
 
-def start_server(port: int) -> subprocess.Popen:
-    proc = subprocess.Popen(
-        [SERVER_BIN, str(port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+def start_server(port: int, document_root=None) -> subprocess.Popen:
+    temporary_root = tempfile.TemporaryDirectory(prefix="web-regression-") if document_root is None else None
+    root = temporary_root.name if temporary_root else os.fspath(document_root)
     try:
-        wait_for_port(port)
+        proc = subprocess.Popen(
+            [SERVER_BIN, str(port), root],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        proc.document_root = root
+        proc.temporary_root = temporary_root
+        try:
+            wait_for_port(port)
+        except Exception:
+            proc.kill()
+            proc.wait()
+            raise
+        return proc
     except Exception:
-        proc.kill()
-        proc.wait()
+        if temporary_root:
+            temporary_root.cleanup()
         raise
-    return proc
 
 
 def stop_server(proc: subprocess.Popen) -> int:
-    proc.send_signal(signal.SIGINT)
     try:
-        return proc.wait(timeout=3.0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        raise
-
+        proc.send_signal(signal.SIGINT)
+        try:
+            return proc.wait(timeout=3.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+    finally:
+        if proc.temporary_root:
+            proc.temporary_root.cleanup()
 
 def receive_to_eof(sock):
     data = bytearray()
@@ -70,7 +83,7 @@ def receive_to_eof(sock):
 
 def main() -> int:
     # 1. CLI 인자 오류 검증
-    for args in [[], ["0"], ["65536"], ["80abc"], ["8080", "extra"]]:
+    for args in [[], ["8080"], ["0", "/tmp"], ["65536", "/tmp"], ["80abc", "/tmp"], ["8080", "/tmp", "extra"]]:
         res = subprocess.run([SERVER_BIN, *args], capture_output=True, text=True)
         assert res.returncode != 0, f"Expected non-zero for args={args}"
     print("[PASS] CLI invalid argument checks")
@@ -135,7 +148,7 @@ def main() -> int:
         print("[PASS] oversized header rejection & recovery")
 
         # 7. 이미 사용 중인 포트 bind 실패 확인
-        dup = subprocess.run([SERVER_BIN, str(port)], capture_output=True, text=True)
+        dup = subprocess.run([SERVER_BIN, str(port), proc.document_root], capture_output=True, text=True)
         assert dup.returncode != 0, "Expected bind failure on already-used port"
         print("[PASS] duplicate port bind failure")
     finally:
@@ -159,7 +172,7 @@ def main() -> int:
     with open("/proc/self/status", encoding="ascii") as status:
         capabilities = next(int(line.split()[1], 16) for line in status if line.startswith("CapEff:"))
     if os.geteuid() != 0 and privileged and not (capabilities & (1 << 10)):
-        priv = subprocess.run([SERVER_BIN, "80"], capture_output=True, text=True)
+        priv = subprocess.run([SERVER_BIN, "80", "/tmp"], capture_output=True, text=True)
         assert priv.returncode != 0, "Expected bind failure on privileged port 80"
         print("[PASS] privileged port 80 bind failure")
 

@@ -2,10 +2,10 @@
 
 ## 현재 상태
 
-- 날짜: 2026-11-21.
+- 날짜: 2026-11-23.
 - 작업 폴더: C:\Users\David\SW-AI-W02-03-TEMPLATE\jungle-week-13-c-web-server. 폴더 이전 후 중복 문서를 병합했다.
 - Iteration 1 구현·컴파일 완료. 사용자 직접 기본 동작 확인을 위해 공식 검증 범위 확정·실행은 보류한다. 성능 측정도 미실행이다.
-- Iteration 2: 선택한 최소 범위 구현 및 서버·단위 테스트 바이너리 컴파일 완료. Python E2E 구문 확인 완료. 공식 검증·성능 측정은 미실행이며 단계 완료는 미판정이다. 현재 실행 대상은 src/에서 빌드한 ./server다. Iteration 3~6은 시작 전이다.
+- Iteration 2: 사용자 보고상 팀 기준으로 채택되어 main에 병합되었다. 이 대화의 공식 검증·성능 측정 미실행 상태와 구분한다. Iteration 3은 동일한 최신 main(06a803a)에서 규칙대로 분기해 정적 파일·greet 구현과 서버/일곱 테스트의 컴파일·링크, 세 E2E 구문 확인을 마쳤다. 확정한 기본 단위 7개·E2E 3개를 모두 통과했다. 성능·실제 운영 권한·광범위한 검증은 미실행이다. 실행은 ./build/server <port> <document-root>다. Iteration 4~6은 시작 전이다.
 - 기존 Ubuntu WSL2에 GCC 11.4.0, GNU Make 4.3, libc6-dev를 준비했다. 도구 설치 당시 기존 Postfix의 빈 mydomain 설정으로 패키지 관리 명령은 오류 종료했으나, 필요한 세 패키지는 install ok installed 상태임을 확인했다. 메일 설정은 변경하지 않았다.
 
 ## 전체 계획
@@ -140,3 +140,41 @@
 WSL에서 make all test_parse_port test_recv_header test_send_all test_http_parser를 실행해 서버(-O2)와 네 개 테스트(sanitizer 옵션)의 컴파일·링크에 성공했다. 테스트 바이너리는 실행하지 않았다. Python AST 구문 확인 성공. make -n test verify는 새 경로를 사용하며 실제 검증은 실행하지 않았다. Git diff --check는 공백 오류 없이 통과했고 LF/CRLF 경고만 있었다.
 build/server·build/obj/main.o·build/test_send_all·build/legacy/webserver가 무시됨을 확인했다. server 및 세 기존 테스트 바이너리를 인덱스에서 제거했으며, 알려진 산출물은 더 이상 추적되지 않는다. 프로젝트 루트·src·tests/unit·scripts에서 ELF/객체 파일이 남아 있지 않음을 확인했다. 기존 webserver는 build/legacy에 보관했다. 커밋·푸시하지 않았고 다른 기존 staged 변경은 유지했다.
 공식 기능 검증(라우팅/Allow·Hello/echo·오류 회귀), 반복·병렬/clean 후 재빌드 검증 및 성능 측정은 미실행이다.
+## Iteration 3 시작·사용자 선택 (2026-11-23)
+- 최신 원격 main과 이전 로컬 HEAD는 06a803a로 동일했다. 파일 차이와 양쪽 추가 커밋은 없었다.
+- 로컬 iteration/3-static-dynamic에서 team/Snoopykid/iteration-3-static-dynamic으로 분기했다. 푸시하지 않았다.
+- 실행은 ./build/server <port> <document-root>로 루트 인자를 필수화한다.
+- /static/ 접두사를 제거한 경로를 정적 루트 아래에 매핑한다. 기존 /·/hello·/echo 동작은 유지한다.
+- 디렉터리 요청은 403. index.html 자동 제공·목록 기능은 제외한다.
+- 요청 경로에서 파일과 중간 디렉터리의 심볼릭 링크 모두 거절한다. 루트 FD 기준 각 요소를 openat로 열어 링크를 따라가지 않는다.
+- 디코딩·정규화와 CLI 루트 자체의 해석 등은 다음 사용자 선택 전이며 아직 코드에 반영하지 않았다.
+### Iteration 3 경로 선택 추가
+- 정적 경로만 한 번 디코딩한다. 인코딩된 슬래시·역슬래시·NUL·제어문자는 400. 디코딩 후 .·.. 세그먼트는 403이며 정규화/반복 디코딩은 하지 않는다.
+- CLI 루트는 OS 해석으로 시작 시 한 번 디렉터리 FD로 열어 고정한다. 설정 경로의 링크는 허용하되 요청 경로에서는 링크를 거절한다. 열기 실패·디렉터리 아님은 시작 실패다.
+## 파일 전송·응답 형식 선택
+- 열린 파일을 fstat로 확인하고 임시 16KiB 버퍼를 재사용하여 read와 기존 부분 송신 처리를 반복한다. 파일 전체 크기의 메모리는 할당하지 않는다.
+- 16KiB는 최적값이 아닌 임시값이다. 전송 중 파일 변경 정책은 별도 사용자 선택 전이다.
+- GET /greet?name=Alice는 text/plain; charset=utf-8 및 Hello, Alice!와 줄바꿈으로 응답한다. 입력 세부 규칙은 결정 전이다.
+- MIME은 html/htm=text/html, css=text/css, js=text/javascript, png=image/png, jpg/jpeg=image/jpeg. 확장자는 대소문자 없이 비교하고 나머지는 application/octet-stream. 파일 내용 추정은 하지 않는다.
+## 최종 경로·전송 소유권 선택과 구현 연결
+- 정적 GET만 지원. POST는 파일 존재 검사 전 405 + Allow: GET. 기존 미구현 메서드 501 유지.
+- /static은 404. 반복 슬래시는 400. 끝이 /인 정적 요청과 디렉터리는 403.
+- 없음/중간 요소가 파일이면 404, 권한/심볼릭 링크/비정규 파일은 403, OS 이름 길이 초과 414, 기타 내부 오류 500.
+- 응답은 메모리/파일 종류, 열린 파일 FD, 길이를 가진다. handle_client가 파일 FD와 생성 본문을 소유/정리하고 송신 함수는 빌려 쓴다. 디코딩 경로 배열은 기존 헤더 상한+NUL로 유도한다.
+- 파일은 최초 fstat 길이까지만 전송. 증가분 제외, 조기 EOF/읽기/송신 오류는 기록 후 연결 정리. 이미 최종 헤더를 보낸 후 오류 응답을 추가하지 않는다. 동일 크기 덮어쓰기/내용 스냅샷은 보장하지 않는다.
+- 정적 트리를 수정할 수 있는 계정과 동시 파일/디렉터리 변경은 신뢰 경계 및 운영 제한이다. 권한과 새 파일+rename 불변 게시 절차는 사용자 추가 선택 대기 중이며 자동으로 설정하지 않는다.
+- /greet는 구분자를 먼저 나누고 키/값을 한 번 디코딩. 디코딩한 키로 name과 중복을 판별한다. 누락 World, 빈/중복 name 400, 알 수 없는 키 의미 무시, +는 쿼리에서만 공백이다. UTF-8/제어문자의 검사 범위는 사용자 추가 선택 전이다.
+- main → static_open_root → open_listenfd → accept → handle_client(root FD 차용) → parse/route → 본문 수신 → static_open_file 또는 메모리 응답 준비 → send_response → 공통 자원 정리 → main의 연결 close. main이 루트 FD를 닫는다.
+## 쿼리 검사·게시 운영 계약 확정
+- /greet의 알려진/알 수 없는 모든 키·값을 디코딩 후 검사한다. 현재 구현 기준은 올바른 UTF-8, U+0000~001F/U+007F~009F 금지이며 과잉 인코딩·대리 코드 포인트·U+10FFFF 초과를 거절한다.
+- 이 인코딩/제어문자 범위는 이번 구현 기준이며, 검증 체크포인트에서 확대 여부를 다시 선택한다. 자동 확대·정규화·정적 경로 정책 변경은 하지 않는다.
+- 서버 계정은 정적 트리 읽기/탐색만, 신뢰하는 게시자만 수정, 기존 inode 덮어쓰기 금지, 같은 파일시스템에 새 파일을 완성·닫고 rename으로 교체하는 운영 계약을 문서화한다.
+- 악의적인 디렉터리 이동/교체·권한 있는 게시자의 콘텐츠 변경은 지원 보장 밖이다. 실제 권한 조건 충족은 아직 확인하지 않았다. 권한 자동 변경·게시 스크립트는 제외한다.
+### Iteration 3 구현 체크포인트
+코드·예제 public·새 필수 루트 인자에 맞춘 회귀 fixture·함수별 walkthrough·게시 신뢰 경계 문서를 작성했다. 서버 및 일곱 테스트 바이너리 컴파일·링크와 세 E2E 구문 확인 성공. diff --check는 LF/CRLF 경고만 있으며 공백 오류는 없었다. build 산출물이 Git 무시 대상임을 확인했다.
+공식 실행 범위는 iteration-3-tests.md의 표로 제안한다. 인코딩/제어문자 범위 재선택과 사용자 추가 검증 검토 후에만 실행한다. 실제 운영 권한 충족, 누수 없음, 동작/DoD 완료를 미리 주장하지 않는다. 커밋·푸시는 하지 않았다.
+## 2026-11-23 공식 기본 검증 실행 결과
+사용자가 현재 UTF-8/제어문자 기준 유지와 단위 7개·E2E 3개 실행을 허락했다. 파일 내용/권한 변경은 테스트 전용 임시 fixture로 제한했다.
+make test의 7개와 make verify의 3개 스크립트 모두 통과. 실패 0, skip 0. 단위 ASan/UBSan 실행에서 오류 보고 없음. E2E는 -O2 서버다. 종료 후 잔여 server 프로세스 없음.
+실제 정적 루트·운영 권한은 변경하지 않았고 실제 권한/ACL 계약 충족은 미검증이다. 광범위한 조합/장애·브라우저 이미지 렌더링·성능은 미검증이다. 정책 변경·성능 측정·커밋/푸시는 하지 않았다.
+상세: docs/iteration-3/Snoopykid/iteration-3-verification-results.md. 로그: build/iteration3-unit.log 및 build/iteration3-e2e.log.
