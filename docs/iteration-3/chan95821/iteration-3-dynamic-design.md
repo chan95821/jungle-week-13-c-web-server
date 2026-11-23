@@ -9,7 +9,8 @@
 | [src/http.h](../../../src/http.h), [src/http.c](../../../src/http.c) | `struct http_request`에 `query` 슬라이스 추가(`parse_start_line()`에서 `?` 분리), `http_reason()`에 `502` 추가 |
 | [src/router.h](../../../src/router.h) | `struct router_response`에 `bool chunked` 추가 (기본 `false`로 기존 고정 길이 계약 보존) |
 | [src/server.c](../../../src/server.c) | `open_listenfd()`/`handle_client()` 소켓 `FD_CLOEXEC` 설정, `send_response()` 청크 헤더 분기 및 청크 본문 송신 경로 추가 |
-| [src/router.c](../../../src/router.c) | `routes[]`에 `GET /greet`, `GET /cgi-bin/` 추가, 내부 동적 핸들러·소유 메모리 제공자·CGI 실행/스트리밍 제공자 추가 |
+| [src/router.c](../../../src/router.c), [src/handlers/handlers.h](../../../src/handlers/handlers.h) | `routes[]`에 `GET /greet`, `GET /cgi-bin/` 등록, 공용 제공자(`router_prepare_borrowed_memory()`, `router_prepare_owned_memory()`)·경로 경계 헬퍼(`router_path_error_status()`, `router_inside_directory()`) 제공 |
+| [src/handlers/basic.c](../../../src/handlers/basic.c), [static.c](../../../src/handlers/static.c), [greet.c](../../../src/handlers/greet.c), [cgi.c](../../../src/handlers/cgi.c) | 기본(`/`, `/hello`, `/echo`)·정적(`/cafe`, `/menu`, `/assets/`)·내부 동적(`/greet`)·외부 CGI(`/cgi-bin/...`) 핸들러 역할별 분리 |
 | [public/assets/cafe.js](../../../public/assets/cafe.js), [cafe.html](../../../public/pages/cafe.html), [menu.html](../../../public/pages/menu.html) | 정적 JS `fetch()` + `DOMParser` 점진적 향상 연결 |
 
 ---
@@ -85,10 +86,10 @@ flowchart TD
         PREP --> SND["5. send_prepared_response()"]
     end
 
-    subgraph L2["2. 분기별 응답 준비 (src/router.c)"]
-        PREP -->|"GET /greet"| PG["내부 동적 핸들러 (chunked = false)"]
-        PREP -->|"GET /cgi-bin/order"| PC["CGI 핸들러 (chunked = true)"]
-        PREP -.->|"실패 (400 / 500 / 502)"| PE["router_prepare_error()"]
+    subgraph L2["2. 분기별 응답 준비 (src/handlers/)"]
+        PREP -->|"GET /greet"| PG["prepare_greet() (greet.c, chunked = false)"]
+        PREP -->|"GET /cgi-bin/order"| PC["prepare_cgi() (cgi.c, chunked = true)"]
+        PREP -.->|"실패 (400 / 500 / 502)"| PE["router_prepare_error() (router.c)"]
     end
 
     subgraph L3["3. 공통 전송 및 자원 해제 (src/server.c)"]
@@ -113,22 +114,22 @@ http_select_handler()
    └─ GET /cgi-bin/  (PREFIX)  → 외부 CGI 핸들러
 ```
 
-#### B. 내부 동적 핸들러 (`GET /greet`, [src/router.c](../../../src/router.c))
+#### B. 내부 동적 핸들러 (`GET /greet`, [src/handlers/greet.c](../../../src/handlers/greet.c))
 ```text
-환영 핸들러 (chunked = false)
-├─ Query 추출·디코딩           # & / 첫 '=' 분리, key·value 디코딩, 전체 %00 차단(400), 첫 "name"
-├─ 도메인 입력 검증            # 0x01~0x1F, 0x7F 차단(400) → 앞뒤 ' ' trim → 빈 값이면 "손님" fallback
-├─ HTML 조립                   # &, <, >, ", ' 이스케이프 길이 계산 + malloc + 복사 (실패 시 500)
-└─ 소유 메모리 provider 등록   # text/html; charset=utf-8, Content-Length 확정
+prepare_greet() (chunked = false)
+├─ extract_query_name()        # & / 첫 '=' 분리, key·value 디코딩, 전체 %00 차단(400), 첫 "name"
+├─ has_control_char() / trim   # 0x01~0x1F, 0x7F 차단(400) → 앞뒤 ' ' trim → 빈 값이면 "손님" fallback
+├─ build_greet_html()          # &, <, >, ", ' 이스케이프 길이 계산 + malloc + 복사 (실패 시 500)
+└─ router_prepare_owned_memory() # text/html; charset=utf-8, Content-Length 확정
 ```
 
-#### C. 외부 CGI 핸들러 (`GET /cgi-bin/...`, [src/router.c](../../../src/router.c))
+#### C. 외부 CGI 핸들러 (`GET /cgi-bin/...`, [src/handlers/cgi.c](../../../src/handlers/cgi.c))
 ```text
-CGI 핸들러 (chunked = true)
-├─ 경로·권한 검증              # '%' 거부(400), 단일 depth / realpath / S_ISREG + X_OK (404)
-├─ 자식 프로세스 실행          # pipe + fork + SIGPIPE 복원 + dup2 + execve (부모 write end 즉시 close)
-├─ CGI 헤더 파싱               # poll(5s) 헤더(\r\n\r\n or \n\n) 파싱 + 잔여 본문 보관 (실패 시 502)
-└─ CGI provider 등록           # Status / Content-Type 설정, 미종료 시 자식 정리
+prepare_cgi() (chunked = true)
+├─ resolve_cgi_script()        # '%' 거부(400), 단일 depth / realpath / S_ISREG + X_OK (404)
+├─ spawn_cgi_process()         # pipe + fork + SIGPIPE 복원 + dup2 + execve (부모 write end 즉시 close)
+├─ read_cgi_header()           # poll(5s) 헤더(\r\n\r\n or \n\n) 파싱 + 잔여 본문 보관 (실패 시 502)
+└─ cgi_body provider           # Status / Content-Type 설정, 미종료 시 자식 정리
 ```
 
 #### D. 응답 전송 · 정리 (`send_prepared_response()`, [src/server.c](../../../src/server.c))
