@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* Process cancellation only; no per-connection state is global. */
@@ -34,6 +35,15 @@ int main(int argc, char *argv[]) {
     uint16_t port;
     if (parse_port(argv[1], &port) < 0) {
         fprintf(stderr, "Invalid port: %s\n", argv[1]);
+        return 1;
+    }
+    struct stat root;
+    if (stat("public", &root) < 0) {
+        perror("public");
+        return 1;
+    }
+    if (!S_ISDIR(root.st_mode)) {
+        fprintf(stderr, "public: not a directory\n");
         return 1;
     }
     if (setup_signals() < 0) { perror("sigaction"); return 1; }

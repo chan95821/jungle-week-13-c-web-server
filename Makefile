@@ -5,7 +5,7 @@ ASAN_FLAGS = -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined
 BUILD_DIR = build
 OBJ_DIR = $(BUILD_DIR)/obj
 TARGET = $(BUILD_DIR)/server
-TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser
+TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_body_send
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
 SRCS = src/main.c src/server.c src/http.c src/router.c
@@ -32,6 +32,9 @@ $(TEST_NAMES): %: $(BUILD_DIR)/%
 
 test: $(TEST_BINS)
 	@for t in $(TEST_BINS); do ./$$t || exit 1; done
+
+$(BUILD_DIR)/test_body_send: tests/unit/test_body_send.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
+	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c src/router.c
 
 $(BUILD_DIR)/test_%: tests/unit/test_%.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< $(TEST_SRCS)

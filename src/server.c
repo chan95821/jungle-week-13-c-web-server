@@ -162,8 +162,29 @@ int open_listenfd(uint16_t port) {
     return fd;
 }
 
+static int send_body(int fd, struct body_provider *provider, size_t length,
+                     const struct io_context *io) {
+    size_t remaining = length;
+    while (remaining > 0) {
+        struct http_slice chunk = {0};
+        errno = 0;
+        enum body_result result = provider->next_func(provider->state, &chunk);
+        if (result != BODY_DATA) {
+            if (result != BODY_ERROR || errno == 0) errno = EIO;
+            return -1;
+        }
+        if (!chunk.data || chunk.length == 0 || chunk.length > remaining) {
+            errno = EIO;
+            return -1;
+        }
+        if (send_bytes(fd, chunk.data, chunk.length, io) < 0) return -1;
+        remaining -= chunk.length;
+    }
+    return 0;
+}
+
 static int send_response(int fd, int status, const char *type,
-                         const void *body, size_t length, const char *allow,
+                         struct body_provider *provider, size_t length, const char *allow,
                          bool head_request, const struct io_context *io) {
     char header[512];
     char allow_line[32] = "";
@@ -185,7 +206,20 @@ static int send_response(int fd, int status, const char *type,
     }
     if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
     if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
-    return head_request ? 0 : send_bytes(fd, body, length, io);
+    return head_request ? 0 : send_body(fd, provider, length, io);
+}
+
+/* Takes responsibility for provider cleanup, including on send failure. */
+static int send_prepared_response(int fd, struct router_response *response,
+                                  bool head_request, const struct io_context *io) {
+    int result = send_response(fd, response->status, response->content_type,
+                               &response->body_provider, response->length,
+                               response->allow, head_request, io);
+    int send_errno = errno;
+    if (response->body_provider.cleanup_func)
+        response->body_provider.cleanup_func(response->body_provider.state);
+    if (result < 0) errno = send_errno;
+    return result;
 }
 
 static void finish_response(int fd, const struct io_context *io) {
@@ -210,7 +244,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     unsigned char header[REQ_HEADER_MAX_BYTES];
     unsigned char *body = NULL;
     struct http_request request = {0};
-    enum http_route route = HTTP_ROUTE_HELLO;
+    router_handler route_handler_func = NULL;
     const char *allow = NULL;
     size_t received = 0, header_end = 0, body_received = 0;
     bool head_request = false;
@@ -243,7 +277,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     status = http_parse_request(header, header_end, &request);
     head_request = http_slice_equal(request.method, "HEAD");
     if (status) goto respond;
-    status = http_route_request(&request, &route, &allow);
+    status = http_select_handler(&request, &route_handler_func, &allow);
     if (status) goto respond;
 
     if (request.content_length) {
@@ -278,13 +312,15 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
 
 respond:
     if (active(&output)) {
-        struct router_response response =
-            router_prepare_response(&request, route, status, allow);
-        if (send_response(connfd, response.status, response.content_type,
-                          response.body, response.length, response.allow,
-                          head_request, &output) == 0) {
+        struct router_response response;
+        if (status == 200 && route_handler_func) route_handler_func(&request, &response);
+        else router_prepare_error(&response, status, allow);
+        int send_result = send_prepared_response(connfd, &response, head_request, &output);
+        int send_errno = errno;
+        if (send_result == 0) {
             finish_response(connfd, &output);
         } else if (active(&output)) {
+            errno = send_errno;
             perror("send response");
         }
     }
