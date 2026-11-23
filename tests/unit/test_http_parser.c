@@ -519,17 +519,21 @@ static void dynamic_greet_responses(void) {
         struct http_request req = route_query_input("GET", "/greet", cases[i].query);
         static const unsigned char ignored_body[] = "hello";
         req.body = (struct http_slice){ignored_body, sizeof(ignored_body) - 1};
+
         router_handler fn = NULL;
         const char *allow = NULL;
         assert(http_select_handler(&req, &fn, &allow) == 0);
+
         struct router_response resp;
         fn(&req, &resp);
         assert(resp.status == cases[i].status);
         assert(!resp.chunked);
+
         unsigned char buf[4096];
         size_t len = 0;
         drain_provider(&resp, buf, sizeof(buf), &len);
         assert(len == resp.length);
+
         if (cases[i].status == 200) {
             assert(strcmp(resp.content_type, "text/html; charset=utf-8") == 0);
             assert(contains_bytes(buf, len,
@@ -636,11 +640,13 @@ static void cgi_responses_and_boundaries(void) {
                 "printf 'Content-Type: text/plain\\nContent-Length: 999\\n\\n'\n"
                 "printf 'q=%s|m=%s|s=%s|sec=%s' \"$QUERY_STRING\" \"$REQUEST_METHOD\" \"$SCRIPT_NAME\" \"$ITER3_PARENT_SECRET\"\n",
                 0700);
+
     req = route_query_input("GET", "/cgi-bin/ok.sh", "a=1&b=%20");
     assert(http_select_handler(&req, &fn, &allow) == 0);
     fn(&req, &resp);
     assert(resp.status == 200 && resp.chunked);
     assert(strcmp(resp.content_type, "text/plain") == 0);
+
     unsigned char cgi_out[4096];
     size_t cgi_len = 0;
     drain_provider(&resp, cgi_out, sizeof(cgi_out), &cgi_len);

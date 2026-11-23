@@ -124,6 +124,7 @@ static void test_response_cleanup(void) {
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         int sv[2];
         assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+
         struct response_test_body body = {
             .result = cases[i].result, .data = cases[i].data,
             .length = cases[i].chunk_length, .peer = sv[1],
@@ -142,6 +143,7 @@ static void test_response_cleanup(void) {
             close(sv[1]);
             body.peer = -1;
         }
+
         int result = send_prepared_response(sv[0], &response, false, NULL);
         int saved_errno = errno;
         assert(result == cases[i].expected_result);
@@ -150,6 +152,7 @@ static void test_response_cleanup(void) {
         if (result < 0) assert(saved_errno != EDOM);
         if (result < 0 && !cases[i].close_before_header && !cases[i].close_in_next)
             assert(saved_errno == EIO);
+
         if (body.peer >= 0) {
             assert(shutdown(sv[0], SHUT_WR) == 0);
             char wire[1024];
@@ -159,6 +162,7 @@ static void test_response_cleanup(void) {
                 used += (size_t)n;
             assert(n == 0);
             wire[used] = '\0';
+
             const char *end = strstr(wire, "\r\n\r\n");
             assert(end != NULL);
             size_t payload = used - (size_t)(end + 4 - wire);
@@ -210,6 +214,7 @@ static void test_chunked_streaming_and_failures(void) {
     assert(send_prepared_response(sv[0], &ok_resp, false, NULL) == 0);
     assert(multi.cleanups == 1);
     assert(shutdown(sv[0], SHUT_WR) == 0);
+
     char wire[512];
     size_t used = 0;
     ssize_t n;
@@ -217,12 +222,14 @@ static void test_chunked_streaming_and_failures(void) {
         used += (size_t)n;
     assert(n == 0);
     wire[used] = '\0';
+
     assert(strstr(wire, "Transfer-Encoding: chunked\r\n") != NULL);
     assert(strstr(wire, "Content-Length:") == NULL);
     const char *body_start = strstr(wire, "\r\n\r\n");
     assert(body_start != NULL);
     body_start += 4;
     assert(strcmp(body_start, "2\r\nab\r\n3\r\ncde\r\n0\r\n\r\n") == 0);
+
     close(sv[0]);
     close(sv[1]);
 

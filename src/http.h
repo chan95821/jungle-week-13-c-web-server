@@ -32,7 +32,9 @@ struct http_request {
 /* Return 0 on success, otherwise an HTTP error status. Never modify input. */
 int http_parse_request(const unsigned char *data, size_t length,
                        struct http_request *request);
+/* Compare slice bytes exactly against a NUL-terminated ASCII string. */
 bool http_slice_equal(struct http_slice value, const char *text);
+/* Return standard reason phrase for a supported HTTP status code. */
 const char *http_reason(int status);
 
 #endif

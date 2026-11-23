@@ -10,6 +10,7 @@ static int hex_val(char c) {
     return -1;
 }
 
+/* Decode form-urlencoded slice into NUL-terminated dst; reject bad '%' syntax, NUL, or overflow. */
 static bool decode_component(const char *src, size_t len, char *dst, size_t cap) {
     size_t out = 0;
     for (size_t i = 0; i < len; ++i) {
@@ -29,25 +30,32 @@ static bool decode_component(const char *src, size_t len, char *dst, size_t cap)
         if (out + 1 >= cap) return false;
         dst[out++] = c;
     }
+
     dst[out] = '\0';
     return true;
 }
 
+/* Extract first "item" and "qty" from QUERY_STRING while validating all query segments. */
 static bool parse_order_query(const char *query, char *item, size_t item_cap,
                               char *qty_buf, size_t qty_cap) {
     item[0] = '\0';
     qty_buf[0] = '\0';
+
     bool got_item = false, got_qty = false;
     size_t len = query ? strlen(query) : 0;
     size_t pos = 0;
+
     while (pos < len) {
         size_t end = pos;
         while (end < len && query[end] != '&') ++end;
+
         if (end > pos) {
             size_t eq = pos;
             while (eq < end && query[eq] != '=') ++eq;
+
             char key[64];
             if (!decode_component(query + pos, eq - pos, key, sizeof(key))) return false;
+
             const char *val_src = eq < end ? query + eq + 1 : "";
             size_t val_len = eq < end ? end - eq - 1 : 0;
             if (!got_item && strcmp(key, "item") == 0) {
@@ -61,11 +69,14 @@ static bool parse_order_query(const char *query, char *item, size_t item_cap,
                 if (!decode_component(val_src, val_len, scratch, sizeof(scratch))) return false;
             }
         }
+
         pos = end + 1;
     }
+
     return true;
 }
 
+/* Parse decimal quantity in 1..99. Return false on non-digits or out-of-range values. */
 static bool parse_qty(const char *s, int *out_qty) {
     if (!s || s[0] == '\0') return false;
     int value = 0;
@@ -102,6 +113,7 @@ static void print_page_tail(void) {
            "</html>\n");
 }
 
+/* Read QUERY_STRING, validate item/qty, and emit CGI headers plus HTML order estimate. */
 int main(void) {
     const char *query = getenv("QUERY_STRING");
     char item[64];
@@ -142,9 +154,11 @@ int main(void) {
 
     int total = unit_price * qty;
     int eta = prep_minutes + (qty - 1);
+
     printf("Content-Type: text/html; charset=utf-8\r\n\r\n");
     print_page_head("주문 견적");
     fflush(stdout);
+
     printf("    <section id=\"order-result\" class=\"result-card\">\n"
            "      <h2>주문 견적 확인</h2>\n"
            "      <p><strong>%s</strong> %d잔 (잔당 %d원)</p>\n"
@@ -152,5 +166,6 @@ int main(void) {
            "    </section>\n",
            label, qty, unit_price, total, eta);
     print_page_tail();
+
     return 0;
 }

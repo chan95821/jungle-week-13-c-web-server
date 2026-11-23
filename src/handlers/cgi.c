@@ -29,6 +29,7 @@ struct cgi_body {
     unsigned char buffer[CGI_CHUNK_BUFFER_SIZE];
 };
 
+/* Compute monotonic clock deadline timeout_ms milliseconds ahead. */
 static bool make_deadline(struct timespec *deadline, int timeout_ms) {
     if (clock_gettime(CLOCK_MONOTONIC, deadline) < 0) return false;
     deadline->tv_sec += timeout_ms / 1000;
@@ -40,6 +41,7 @@ static bool make_deadline(struct timespec *deadline, int timeout_ms) {
     return true;
 }
 
+/* Wait via poll() until fd is readable or deadline expires. Return 0 or -1 (ETIMEDOUT). */
 static int wait_readable(int fd, const struct timespec *deadline) {
     for (;;) {
         struct timespec now;
@@ -72,6 +74,7 @@ static bool is_token_char_cgi(unsigned char c) {
     return c != 0 && strchr("!#$%&'*+-.^_`|~", c) != NULL;
 }
 
+/* Find earliest CGI header terminator (\n\n or \r\n\r\n) and set sep_len, or SIZE_MAX. */
 static size_t find_header_end(const unsigned char *buf, size_t len, size_t *sep_len) {
     for (size_t i = 0; i < len; ++i) {
         if (i + 2 <= len && buf[i] == '\n' && buf[i + 1] == '\n') {
@@ -87,6 +90,7 @@ static size_t find_header_end(const unsigned char *buf, size_t len, size_t *sep_
     return SIZE_MAX;
 }
 
+/* Parse CGI Status field (200..599 excluding 204/304). Return false on invalid code. */
 static bool parse_cgi_status(const char *val, size_t len, int *status_out) {
     if (len < 3) return false;
     for (size_t i = 0; i < 3; ++i) {
@@ -103,6 +107,7 @@ static bool header_name_equal(const char *name, size_t len, const char *target) 
     return len == strlen(target) && strncasecmp(name, target, len) == 0;
 }
 
+/* Parse CGI response headers; require Content-Type, accept optional Status, ignore framing headers. */
 static bool parse_cgi_headers(const unsigned char *hdr, size_t hdr_len,
                               struct cgi_body *cgi, int *status_out) {
     int status = 200;
@@ -136,6 +141,7 @@ static bool parse_cgi_headers(const unsigned char *hdr, size_t hdr_len,
         const char *name = (const char *)line;
         const char *val = (const char *)(line + vstart);
         size_t vlen = vend - vstart;
+
         if (header_name_equal(name, colon, "content-type")) {
             if (seen_type || vlen == 0) return false;
             seen_type = true;
@@ -147,15 +153,19 @@ static bool parse_cgi_headers(const unsigned char *hdr, size_t hdr_len,
             if (seen_status || !parse_cgi_status(val, vlen, &status)) return false;
             seen_status = true;
         }
+
         pos = line_end < hdr_len ? line_end + 1 : hdr_len;
     }
+
     if (!seen_type) return false;
     *status_out = status;
     return true;
 }
 
+/* Reap CGI child via waitpid(); on force_terminate send SIGTERM then SIGKILL to prevent zombies. */
 static int reap_cgi_child(struct cgi_body *cgi, bool force_terminate) {
     if (cgi->reaped || cgi->pid <= 0) return -1;
+
     int wstatus = 0;
     if (!force_terminate) {
         pid_t res;
@@ -166,6 +176,7 @@ static int reap_cgi_child(struct cgi_body *cgi, bool force_terminate) {
         cgi->reaped = true;
         return wstatus;
     }
+
     pid_t res = waitpid(cgi->pid, &wstatus, WNOHANG);
     if (res == 0) {
         kill(cgi->pid, SIGTERM);
@@ -186,10 +197,12 @@ static int reap_cgi_child(struct cgi_body *cgi, bool force_terminate) {
             res = waitpid(cgi->pid, &wstatus, 0);
         } while (res < 0 && errno == EINTR);
     }
+
     if (res > 0) cgi->reaped = true;
     return wstatus;
 }
 
+/* Yield buffered initial body first, then stream pipe reads; require exit status 0 at EOF. */
 static enum body_result cgi_body_next(void *state, struct http_slice *chunk) {
     struct cgi_body *cgi = state;
     if (cgi->initial_pos < cgi->initial_len) {
@@ -225,6 +238,7 @@ static enum body_result cgi_body_next(void *state, struct http_slice *chunk) {
     return BODY_END;
 }
 
+/* Close CGI pipe FD, reap any running child process, and free cgi_body state. */
 static void cgi_body_cleanup(void *state) {
     struct cgi_body *cgi = state;
     if (cgi->fd >= 0) {
@@ -236,6 +250,7 @@ static void cgi_body_cleanup(void *state) {
     free(cgi);
 }
 
+/* Validate single-depth CGI script under "cgi-bin": reject '%' (400), outside/non-exec (404). */
 static int resolve_cgi_script(struct http_slice path, char **resolved_out,
                               char **script_name_out) {
     static const char prefix[] = "/cgi-bin/";
@@ -245,6 +260,7 @@ static int resolve_cgi_script(struct http_slice path, char **resolved_out,
 
     if (memchr(path.data, '%', path.length)) return 400;
     if (path.length <= prefix_len) return 404;
+
     const unsigned char *rel = path.data + prefix_len;
     size_t rel_len = path.length - prefix_len;
     if (memchr(rel, '/', rel_len)) return 404;
@@ -299,11 +315,13 @@ static int resolve_cgi_script(struct http_slice path, char **resolved_out,
     }
     memcpy(script_name, path.data, path.length);
     script_name[path.length] = '\0';
+
     *resolved_out = resolved;
     *script_name_out = script_name;
     return 0;
 }
 
+/* Allocate a "KEY=VALUE" environment string for execve(). Return NULL on OOM/overflow. */
 static char *make_env_var(const char *key, struct http_slice value) {
     size_t klen = strlen(key);
     if (value.length > SIZE_MAX - klen - 2) return NULL;
@@ -316,6 +334,7 @@ static char *make_env_var(const char *key, struct http_slice value) {
     return entry;
 }
 
+/* Fork CGI child with minimal envp and pipe stdout; parent closes write end immediately. */
 static int spawn_cgi_process(const char *resolved, const char *script_name,
                              struct http_slice query, pid_t *pid_out, int *fd_out) {
     *pid_out = -1;
@@ -354,16 +373,19 @@ static int spawn_cgi_process(const char *resolved, const char *script_name,
     if (pid == 0) {
         signal(SIGPIPE, SIG_DFL);
         close(pipefd[0]);
+
         int devnull = open("/dev/null", O_RDONLY);
         if (devnull < 0) _exit(127);
         if (devnull != STDIN_FILENO) {
             if (dup2(devnull, STDIN_FILENO) < 0) _exit(127);
             close(devnull);
         }
+
         if (pipefd[1] != STDOUT_FILENO) {
             if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(127);
             close(pipefd[1]);
         }
+
         execve(resolved, argv, envp);
         _exit(127);
     }
@@ -371,11 +393,13 @@ static int spawn_cgi_process(const char *resolved, const char *script_name,
     close(pipefd[1]);
     free(exec_arg); free(env_method); free(env_query);
     free(env_script); free(env_proto); free(env_path);
+
     *pid_out = pid;
     *fd_out = pipefd[0];
     return 0;
 }
 
+/* Read CGI stdout up to header terminator within timeout, saving any trailing body bytes. */
 static int read_cgi_header(struct cgi_body *cgi, int *status_out) {
     unsigned char raw[CGI_HEADER_MAX_BYTES];
     size_t used = 0;
@@ -387,6 +411,7 @@ static int read_cgi_header(struct cgi_body *cgi, int *status_out) {
         size_t end = find_header_end(raw, used, &sep_len);
         if (end != SIZE_MAX) {
             if (!parse_cgi_headers(raw, end, cgi, status_out)) return 502;
+
             size_t body_start = end + sep_len;
             size_t rem = used - body_start;
             if (rem > 0) {
@@ -396,8 +421,10 @@ static int read_cgi_header(struct cgi_body *cgi, int *status_out) {
             }
             return 0;
         }
+
         if (used == sizeof(raw)) return 502;
         if (wait_readable(cgi->fd, &deadline) < 0) return 502;
+
         ssize_t count;
         do {
             count = read(cgi->fd, raw + used, sizeof(raw) - used);
@@ -407,6 +434,7 @@ static int read_cgi_header(struct cgi_body *cgi, int *status_out) {
     }
 }
 
+/* Execute CGI script under /cgi-bin/ and prepare chunked response (500 on OS fail, 502 on CGI fail). */
 void prepare_cgi(const struct http_request *request,
                  struct router_response *response) {
     char *resolved = NULL, *script_name = NULL;

@@ -32,6 +32,7 @@ typedef void (*router_handler)(const struct http_request *request,
 int http_select_handler(const struct http_request *request,
                         router_handler *route_handler_func, const char **allow);
 
+/* Prepare a text/plain error response using http_reason() and optional Allow header. */
 void router_prepare_error(struct router_response *response, int status,
                           const char *allow);
 

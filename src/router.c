@@ -7,6 +7,7 @@
 
 enum route_match { ROUTE_EXACT, ROUTE_PREFIX };
 
+/* Yield borrowed memory slice once, then signal BODY_END. */
 static enum body_result memory_body_next(void *state, struct http_slice *chunk) {
     struct http_slice *remaining = state;
     if (remaining->length == 0) return BODY_END;
@@ -38,6 +39,7 @@ struct owned_body {
     size_t sent;
 };
 
+/* Yield heap-owned buffer once, then signal BODY_END. */
 static enum body_result owned_body_next(void *state, struct http_slice *chunk) {
     struct owned_body *body = state;
     if (body->sent == body->length) return BODY_END;
@@ -46,6 +48,7 @@ static enum body_result owned_body_next(void *state, struct http_slice *chunk) {
     return BODY_DATA;
 }
 
+/* Release heap-owned response buffer and its provider state. */
 static void owned_body_cleanup(void *state) {
     struct owned_body *body = state;
     free(body->data);
@@ -60,6 +63,7 @@ bool router_prepare_owned_memory(struct router_response *response,
         free(data);
         return false;
     }
+
     *body = (struct owned_body){.data = data, .length = length, .sent = 0};
     *response = (struct router_response){
         .status = status,
@@ -71,6 +75,7 @@ bool router_prepare_owned_memory(struct router_response *response,
             .state = body
         }
     };
+
     return true;
 }
 
@@ -109,20 +114,25 @@ static const struct route_rule routes[] = {
     {"/cgi-bin/", "GET", ROUTE_PREFIX, prepare_cgi},
 };
 
+/* Return true when path starts with the literal prefix rule. */
 static bool path_has_prefix(struct http_slice path, const char *prefix) {
     size_t length = strlen(prefix);
     return path.length >= length && memcmp(path.data, prefix, length) == 0;
 }
 
+/* Match raw request path against either an exact or prefix route rule. */
 static bool path_matches_rule(struct http_slice path, const struct route_rule *rule) {
     if (rule->match == ROUTE_PREFIX) return path_has_prefix(path, rule->path);
     return http_slice_equal(path, rule->path);
 }
 
+/* Select longest matching route (exact beats prefix on ties, first wins duplicates).
+ * Returns 0 on match, or 404 / 405 (with Allow) / 501 on failure. */
 static int select_rule(const struct http_request *r,
                        const struct route_rule **selected, const char **allow) {
     *selected = NULL;
     *allow = NULL;
+
     bool get = http_slice_equal(r->method, "GET");
     bool post = http_slice_equal(r->method, "POST");
     if (!get && !post) return 501;
@@ -130,12 +140,14 @@ static int select_rule(const struct http_request *r,
     const struct route_rule *best = NULL;
     size_t best_length = 0;
     bool allow_get = false, allow_post = false;
+
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); ++i) {
         const struct route_rule *rule = &routes[i];
         if (!path_matches_rule(r->path, rule)) continue;
 
         if (strcmp(rule->method, "GET") == 0) allow_get = true;
         if (strcmp(rule->method, "POST") == 0) allow_post = true;
+
         size_t length = strlen(rule->path);
         if (http_slice_equal(r->method, rule->method) &&
             (!best || length > best_length ||
@@ -145,11 +157,13 @@ static int select_rule(const struct http_request *r,
             best_length = length;
         }
     }
+
     if (best) {
         *selected = best;
         return 0;
     }
     if (!allow_get && !allow_post) return 404;
+
     *allow = allow_get && allow_post ? "GET, POST" : allow_get ? "GET" : "POST";
     return 405;
 }
