@@ -18,6 +18,7 @@ struct router_response {
     const char *content_type;
     const void *body;
     size_t length;
+    bool chunked;
     const char *allow;
     struct body_provider body_provider;
     struct http_slice memory_body;

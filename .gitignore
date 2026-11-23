@@ -62,3 +62,4 @@ dkms.conf
 /test_http_parser
 __pycache__/
 /build/
+/cgi-bin/

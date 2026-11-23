@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -136,9 +137,20 @@ int parse_port(const char *arg, uint16_t *out_port) {
     return 0;
 }
 
+static int set_cloexec(int fd) {
+    int flags = fcntl(fd, F_GETFD);
+    if (flags < 0) return -1;
+    return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+}
+
 int open_listenfd(uint16_t port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) { perror("socket"); return -1; }
+    if (set_cloexec(fd) < 0) {
+        perror("listener cloexec");
+        close(fd);
+        return -1;
+    }
     const int enabled = 1;
     const struct timeval timeout = {.tv_sec = IO_CALL_TIMEOUT_SECONDS, .tv_usec = 0};
     /* Bound accept as well, so a pre-call shutdown signal cannot strand it. */
@@ -183,8 +195,36 @@ static int send_body(int fd, struct body_provider *provider, size_t length,
     return 0;
 }
 
+static int send_chunked_body(int fd, struct body_provider *provider,
+                             const struct io_context *io) {
+    for (;;) {
+        struct http_slice chunk = {0};
+        errno = 0;
+        enum body_result result = provider->next_func(provider->state, &chunk);
+        if (result == BODY_END) return send_bytes(fd, "0\r\n\r\n", 5, io);
+        if (result != BODY_DATA) {
+            if (result != BODY_ERROR || errno == 0) errno = EIO;
+            return -1;
+        }
+        if (!chunk.data || chunk.length == 0) {
+            errno = EIO;
+            return -1;
+        }
+        char prefix[32];
+        int count = snprintf(prefix, sizeof(prefix), "%zx\r\n", chunk.length);
+        if (count < 0 || (size_t)count >= sizeof(prefix)) {
+            errno = EOVERFLOW;
+            return -1;
+        }
+        if (send_bytes(fd, prefix, (size_t)count, io) < 0) return -1;
+        if (send_bytes(fd, chunk.data, chunk.length, io) < 0) return -1;
+        if (send_bytes(fd, "\r\n", 2, io) < 0) return -1;
+    }
+}
+
 static int send_response(int fd, int status, const char *type,
-                         struct body_provider *provider, size_t length, const char *allow,
+                         struct body_provider *provider, size_t length,
+                         bool chunked, const char *allow,
                          bool head_request, const struct io_context *io) {
     char header[512];
     char allow_line[32] = "";
@@ -198,6 +238,11 @@ static int send_response(int fd, int status, const char *type,
         count = snprintf(header, sizeof(header),
                          "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%sConnection: close\r\n\r\n",
                          status, http_reason(status), type, allow_line);
+    } else if (chunked) {
+        count = snprintf(header, sizeof(header),
+                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nTransfer-Encoding: chunked\r\n"
+                         "%sConnection: close\r\n\r\n",
+                         status, http_reason(status), type, allow_line);
     } else {
         count = snprintf(header, sizeof(header),
                          "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
@@ -206,7 +251,9 @@ static int send_response(int fd, int status, const char *type,
     }
     if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
     if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
-    return head_request ? 0 : send_body(fd, provider, length, io);
+    if (head_request) return 0;
+    return chunked ? send_chunked_body(fd, provider, io)
+                   : send_body(fd, provider, length, io);
 }
 
 /* Takes responsibility for provider cleanup, including on send failure. */
@@ -214,7 +261,7 @@ static int send_prepared_response(int fd, struct router_response *response,
                                   bool head_request, const struct io_context *io) {
     int result = send_response(fd, response->status, response->content_type,
                                &response->body_provider, response->length,
-                               response->allow, head_request, io);
+                               response->chunked, response->allow, head_request, io);
     int send_errno = errno;
     if (response->body_provider.cleanup_func)
         response->body_provider.cleanup_func(response->body_provider.state);
@@ -253,6 +300,11 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     struct io_context input = {running, &header_deadline};
     const struct io_context output = {running, NULL};
     int status = 0;
+
+    if (set_cloexec(connfd) < 0) {
+        perror("client cloexec");
+        goto cleanup;
+    }
 
     int result = receive_header(connfd, header, sizeof(header),
                                 &received, &header_end, &input);

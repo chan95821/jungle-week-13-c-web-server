@@ -5,6 +5,8 @@ ASAN_FLAGS = -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined
 BUILD_DIR = build
 OBJ_DIR = $(BUILD_DIR)/obj
 TARGET = $(BUILD_DIR)/server
+CGI_DIR = cgi-bin
+CGI_BINS = $(CGI_DIR)/order
 TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_body_send
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
@@ -13,20 +15,25 @@ OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 HEADERS = src/server.h src/http.h src/router.h
 TEST_SRCS = src/server.c src/http.c src/router.c
 
-.PHONY: all test verify clean server $(TEST_NAMES)
+.PHONY: all test verify clean server cgi $(TEST_NAMES)
 
-all: $(TARGET)
+all: $(TARGET) $(CGI_BINS)
 
-$(BUILD_DIR) $(OBJ_DIR):
+$(BUILD_DIR) $(OBJ_DIR) $(CGI_DIR):
 	mkdir -p $@
 
 $(TARGET): $(OBJS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(OBJS)
 
+$(CGI_DIR)/%: cgi-src/%.c | $(CGI_DIR)
+	$(CC) $(CFLAGS) -o $@ $<
+
 $(OBJ_DIR)/%.o: src/%.c $(HEADERS) | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 server: $(TARGET)
+
+cgi: $(CGI_BINS)
 
 $(TEST_NAMES): %: $(BUILD_DIR)/%
 
@@ -39,9 +46,11 @@ $(BUILD_DIR)/test_body_send: tests/unit/test_body_send.c $(TEST_SRCS) $(HEADERS)
 $(BUILD_DIR)/test_%: tests/unit/test_%.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< $(TEST_SRCS)
 
-verify: $(TARGET)
+verify: $(TARGET) $(CGI_BINS)
 	python3 scripts/verify_iter1.py
 	python3 scripts/verify_iter2.py
+	python3 scripts/verify_iter3.py --root public --cafe pages/cafe.html --menu pages/menu.html
+	python3 scripts/verify_iter3_dynamic.py
 
 clean:
-	rm -f $(OBJS) $(TARGET) $(TEST_BINS)
+	rm -f $(OBJS) $(TARGET) $(CGI_BINS) $(TEST_BINS)

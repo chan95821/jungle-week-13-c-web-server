@@ -5,17 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>메뉴 | 정글 카페</title>
   <link rel="stylesheet" href="/assets/cafe.css">
+  <script src="/assets/cafe.js" defer></script>
 </head>
 <body>
   <main>
     <p class="eyebrow">JUNGLE CAFE</p>
     <h1>오늘의 메뉴</h1>
     <ul>
-      <li>아메리카노</li>
-      <li>카페 라테</li>
-      <li>허브 티</li>
+      <li>아메리카노 — 4,000원</li>
+      <li>카페 라테 — 4,500원</li>
+      <li>허브 티 — 4,000원</li>
     </ul>
-    <a href="/cafe">← 카페 소개</a>
+    <form class="demo-form" action="/cgi-bin/order" method="get" data-async-target="order-result">
+      <label for="order-item">음료</label>
+      <select id="order-item" name="item">
+        <option value="americano">아메리카노 (4,000원)</option>
+        <option value="latte">카페 라테 (4,500원)</option>
+        <option value="tea">허브 티 (4,000원)</option>
+      </select>
+      <label for="order-qty">수량</label>
+      <input id="order-qty" name="qty" type="number" min="1" max="99" value="1">
+      <button type="submit">견적 확인 (CGI)</button>
+    </form>
+    <div id="order-result" aria-live="polite"></div>
+    <p class="nav-links"><a href="/cafe">← 카페 소개</a></p>
   </main>
 </body>
 </html>

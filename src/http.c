@@ -178,6 +178,14 @@ static int parse_start_line(struct http_slice line, struct http_request *r,
     size_t path_length = 0;
     while (path_length < r->target.length && r->target.data[path_length] != '?') ++path_length;
     r->path = (struct http_slice){r->target.data, path_length};
+    if (path_length < r->target.length) {
+        r->query = (struct http_slice){
+            r->target.data + path_length + 1,
+            r->target.length - path_length - 1
+        };
+    } else {
+        r->query = (struct http_slice){NULL, 0};
+    }
     return 0;
 }
 
@@ -351,6 +359,7 @@ const char *http_reason(int status) {
     case 431: return "Request Header Fields Too Large";
     case 500: return "Internal Server Error";
     case 501: return "Not Implemented";
+    case 502: return "Bad Gateway";
     case 505: return "HTTP Version Not Supported";
     default: return "Internal Server Error";
     }

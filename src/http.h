@@ -19,6 +19,7 @@ struct http_request {
     struct http_slice target;
     struct http_slice version;
     struct http_slice path;
+    struct http_slice query;
     struct http_slice host;
     struct http_slice body;
     size_t content_length;
