@@ -1,32 +1,25 @@
 #ifndef SERVER_H
 #define SERVER_H
 
-#include <signal.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <time.h>
 #include "http.h"
+#include "proxy.h"
+#include "socket_io.h"
 
-/* Provisional policy constants; each can be reconsidered independently. */
+/* Provisional client policy; backend policy is separately named in proxy.h. */
 enum {
-    LISTEN_BACKLOG = 128,
-    IO_CALL_TIMEOUT_SECONDS = 5,
     HEADER_DEADLINE_SECONDS = 7,
     BODY_DEADLINE_SECONDS = 15,
     DRAIN_DEADLINE_SECONDS = 1,
     DRAIN_MAX_BYTES = 64 * 1024
 };
 
-/* Parse decimal TCP port in 1..65535. Return 0 on success, -1 otherwise. */
-int parse_port(const char *arg, uint16_t *out_port);
-/* Create, bind, and listen on IPv4 port with FD_CLOEXEC and SO_REUSEADDR. Return fd or -1. */
-int open_listenfd(uint16_t port);
 /* Legacy framing contract: out_len includes any body bytes already received. */
 int recv_until_header_end(int fd, char *buf, size_t cap, size_t *out_len);
-/* Send the entire buffer reliably without an io_context deadline. Return 0 or -1. */
-int send_all(int fd, const void *buf, size_t len);
-/* Borrow the FD and cancellation flag. Main closes the FD exactly once. */
-void handle_client(int connfd, const volatile sig_atomic_t *running,
-                   const struct timespec *accepted_at);
+/* Borrow client FD, main-owned immutable configuration and mutable selection state.
+ * main closes client FD; this function owns request memory until response cleanup. */
+void handle_client(int client_fd, const volatile sig_atomic_t *running,
+                   const struct timespec *accepted_at,
+                   const struct proxy_config *proxy_config,
+                   struct proxy_selection_state *selection);
 
 #endif

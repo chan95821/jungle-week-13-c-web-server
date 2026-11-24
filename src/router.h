@@ -9,6 +9,7 @@ struct body_provider {
     enum body_result (*next_func)(void *state, struct http_slice *chunk);
     void (*cleanup_func)(void *state);
     void *state;
+    const struct http_slice *trailers; /* Optional validated fields after BODY_END. */
 };
 
 /* Borrows body storage. A prepared provider may point inside this object:
@@ -22,6 +23,7 @@ struct router_response {
     const char *allow;
     struct body_provider body_provider;
     struct http_slice memory_body;
+    struct http_slice wire_header; /* Validated proxy header; provider owns storage. */
 };
 
 /* Prepare in caller-owned storage so the provider's state remains valid. */

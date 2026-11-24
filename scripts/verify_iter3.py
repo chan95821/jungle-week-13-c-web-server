@@ -5,7 +5,7 @@ Example after integration:
   python3 scripts/verify_iter3.py --root public --cafe pages/cafe.html \
       --menu pages/menu.html
 
-The default server command is build/server PORT. For a different CLI, supply
+The default server command is build/server PORT PROXY_CONFIG (temporary config by default). For a different CLI, supply
 --server-arg once per argument, using {port} and, if needed, {root}.
 All fixtures live in an isolated temporary working directory.
 """
@@ -19,6 +19,7 @@ import tempfile
 import time
 
 from verify_iter1 import SERVER_BIN, pick_free_port
+from proxy_test_config import regression_config
 from verify_iter2 import ResponseReader
 
 
@@ -32,7 +33,7 @@ def relative_path(value):
 def command(args, port):
     return [str(args.server)] + [
         arg.replace("{port}", str(port)).replace("{root}", str(args.root))
-        for arg in (args.server_arg if args.server_arg is not None else ["{port}"])
+        for arg in (args.server_arg if args.server_arg is not None else ["{port}", regression_config()])
     ]
 
 

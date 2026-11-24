@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 
 from verify_iter1 import SERVER_BIN, pick_free_port, start_server, stop_server
+from proxy_test_config import regression_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -169,7 +170,7 @@ def test_isolated_cgi_faults():
         root = Path(tmp)
         shutil.copytree(REPO_ROOT / "public", root / "public")
         port = pick_free_port()
-        proc = subprocess.Popen([str(server_bin), str(port)], cwd=root,
+        proc = subprocess.Popen([str(server_bin), str(port), regression_config()], cwd=root,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             # Wait for port
@@ -208,7 +209,7 @@ def test_isolated_cgi_faults():
         fds.chmod(0o700)
 
         port = pick_free_port()
-        proc = subprocess.Popen([str(server_bin), str(port)], cwd=root,
+        proc = subprocess.Popen([str(server_bin), str(port), regression_config()], cwd=root,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             for _ in range(60):

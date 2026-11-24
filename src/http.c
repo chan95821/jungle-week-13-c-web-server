@@ -317,6 +317,7 @@ int http_parse_request(const unsigned char *data, size_t length,
                                   &unsupported_target);
     if (status) return status;
 
+    r->headers = (struct http_slice){data + line_length + 2, length - line_length - 4};
     size_t offset = line_length + 2;
     bool host_seen = false, transfer_seen = false, last_chunked = false;
     unsigned int chunked_count = 0;
@@ -391,7 +392,35 @@ const char *http_reason(int status) {
     case 500: return "Internal Server Error";
     case 501: return "Not Implemented";
     case 502: return "Bad Gateway";
+    case 504: return "Gateway Timeout";
     case 505: return "HTTP Version Not Supported";
     default: return "Internal Server Error";
     }
+}
+
+bool http_field_name_equal(struct http_slice name, const char *lowercase_name) {
+    return equal_case(name, lowercase_name);
+}
+
+int http_next_field(struct http_slice fields, size_t *offset, struct http_field *field) {
+    if (*offset == fields.length) return 0;
+    if (*offset > fields.length) return -1;
+    const unsigned char *line = fields.data + *offset;
+    size_t length = crlf(line, fields.length - *offset);
+    if (length == SIZE_MAX || length == 0) return -1;
+    size_t colon = 0;
+    while (colon < length && line[colon] != ':') {
+        if (!token_char(line[colon])) return -1;
+        ++colon;
+    }
+    if (colon == 0 || colon == length) return -1;
+    struct http_slice value = {line + colon + 1, length - colon - 1};
+    for (size_t i = 0; i < value.length; ++i) {
+        unsigned char c = value.data[i];
+        if ((c < 32 && c != '	') || c == 127) return -1;
+    }
+    field->name = (struct http_slice){line, colon};
+    field->value = trim(value);
+    *offset += length + 2;
+    return 1;
 }

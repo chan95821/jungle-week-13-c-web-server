@@ -2,109 +2,134 @@
 #include "server.h"
 #include "router.h"
 
-#include <arpa/inet.h>
-#include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <netinet/in.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <unistd.h>
 
-struct io_context {
-    const volatile sig_atomic_t *running;
-    const struct timespec *deadline;
-};
 
-/* Check whether server shutdown has not been requested. */
-static bool active(const struct io_context *io) {
-    return !io || !io->running || *io->running != 0;
-}
+static int receive_request_headers(int fd, unsigned char *buf, size_t cap,
+                          size_t *received, size_t *header_end,
+                          const struct io_context *io);
+static int send_prepared_response(int fd, struct router_response *response,
+                                  bool head_request, const struct io_context *io);
+static void finish_response(int fd, const struct io_context *io);
 
-/* Return true when monotonic clock has reached or passed deadline. */
-static bool deadline_passed(const struct timespec *now, const struct timespec *deadline) {
-    return now->tv_sec > deadline->tv_sec ||
-           (now->tv_sec == deadline->tv_sec && now->tv_nsec >= deadline->tv_nsec);
-}
+void handle_client(int client_fd, const volatile sig_atomic_t *running,
+                   const struct timespec *accepted_at,
+                   const struct proxy_config *proxy_config,
+                   struct proxy_selection_state *selection) {
+    unsigned char request_header[REQ_HEADER_MAX_BYTES];
+    unsigned char *request_body = NULL;
+    struct http_request request = {0};
+    router_handler route_handler_func = NULL;
+    enum proxy_route proxy_route = PROXY_ROUTE_LOCAL;
+    const char *allow = NULL;
+    size_t received_bytes = 0, header_end_offset = 0, body_received_bytes = 0;
+    bool head_request = false;
+    struct timespec header_deadline = *accepted_at;
+    header_deadline.tv_sec += HEADER_DEADLINE_SECONDS;
+    struct io_context request_io = {running, &header_deadline};
+    const struct io_context client_response_io = {running, NULL};
+    int status = 0;
 
-/* A positive, rounded-up timeout: zero would disable SO_*TIMEO entirely. */
-static int set_call_timeout(int fd, int option, const struct io_context *io) {
-    if (!io) return 0;
-    if (!active(io)) { errno = ECANCELED; return -1; }
+    if (set_close_on_exec(client_fd) < 0) {
+        perror("client cloexec");
+        goto cleanup;
+    }
 
-    struct timeval timeout = {.tv_sec = IO_CALL_TIMEOUT_SECONDS, .tv_usec = 0};
-    if (io->deadline) {
-        struct timespec now;
-        if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
-        if (deadline_passed(&now, io->deadline)) { errno = ETIMEDOUT; return -1; }
+    int result = receive_request_headers(client_fd, request_header, sizeof(request_header),
+                                &received_bytes, &header_end_offset, &request_io);
+    if (!server_is_running(&request_io)) goto cleanup;
+    if (result == 1) {
+        if (received_bytes == 0) goto cleanup;
+        status = 400;
+        goto respond;
+    }
+    if (result < 0) {
+        if (errno == EMSGSIZE) status = 431;
+        else if (socket_io_timed_out()) status = 408;
+        else { perror("receive request headers"); goto cleanup; }
+        goto respond;
+    }
 
-        time_t seconds = io->deadline->tv_sec - now.tv_sec;
-        long nanoseconds = io->deadline->tv_nsec - now.tv_nsec;
-        if (nanoseconds < 0) { --seconds; nanoseconds += 1000000000L; }
+    struct timespec body_deadline;
+    if (clock_gettime(CLOCK_MONOTONIC, &body_deadline) < 0) {
+        status = 500;
+        goto respond;
+    }
+    body_deadline.tv_sec += BODY_DEADLINE_SECONDS;
 
-        if (seconds < IO_CALL_TIMEOUT_SECONDS) {
-            timeout.tv_sec = seconds;
-            timeout.tv_usec = (nanoseconds + 999L) / 1000L;
-            if (timeout.tv_usec == 1000000L) {
-                ++timeout.tv_sec;
-                timeout.tv_usec = 0;
-            }
+    status = http_parse_request(request_header, header_end_offset, &request);
+    head_request = http_slice_equal(request.method, "HEAD");
+    if (status) goto respond;
+    status = proxy_match_request(&request, &proxy_route, &allow);
+    if (!status && proxy_route == PROXY_ROUTE_LOCAL)
+        status = http_select_handler(&request, &route_handler_func, &allow);
+    if (status) goto respond;
+
+    if (request.content_length) {
+        request_body = malloc(request.content_length);
+        if (!request_body) { status = 500; goto respond; }
+        body_received_bytes = received_bytes - header_end_offset;
+        if (body_received_bytes > request.content_length) body_received_bytes = request.content_length;
+        memcpy(request_body, request_header + header_end_offset, body_received_bytes);
+    }
+
+    if (request.expect_continue && body_received_bytes < request.content_length) {
+        static const char interim[] = "HTTP/1.1 100 Continue\r\n\r\n";
+        if (send_all_with_deadline(client_fd, interim, sizeof(interim) - 1, &client_response_io) < 0) {
+            if (server_is_running(&client_response_io)) perror("send 100 Continue");
+            goto cleanup;
         }
     }
 
-    return setsockopt(fd, SOL_SOCKET, option, &timeout, sizeof(timeout));
-}
-
-/* Identify socket timeout errors across SO_RCVTIMEO/SO_SNDTIMEO implementations. */
-static bool timed_out(void) {
-    return errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK;
-}
-
-/* Receive up to len bytes while honoring io cancellation, EINTR, and deadline. */
-static ssize_t receive_some(int fd, void *buf, size_t len, const struct io_context *io) {
-    for (;;) {
-        if (set_call_timeout(fd, SO_RCVTIMEO, io) < 0) return -1;
-        ssize_t count = recv(fd, buf, len, 0);
-        if (!active(io)) { errno = ECANCELED; return -1; }
-        if (count < 0 && errno == EINTR) continue;
-        if (count > 0 && io && io->deadline) {
-            struct timespec now;
-            if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
-            if (deadline_passed(&now, io->deadline)) { errno = ETIMEDOUT; return -1; }
-        }
-        return count;
-    }
-}
-
-/* Send all len bytes, retrying short writes and EINTR. Return 0 or -1. */
-static int send_bytes(int fd, const void *buf, size_t len, const struct io_context *io) {
-    if (len == 0) return 0;
-    if (!buf) { errno = EINVAL; return -1; }
-
-    const unsigned char *data = buf;
-    size_t sent = 0;
-    while (sent < len) {
-        if (set_call_timeout(fd, SO_SNDTIMEO, io) < 0) return -1;
-
-        ssize_t count = send(fd, data + sent, len - sent, 0);
-        if (!active(io)) { errno = ECANCELED; return -1; }
+    request_io.deadline = &body_deadline;
+    while (body_received_bytes < request.content_length) {
+        ssize_t count = receive_with_deadline(client_fd, request_body + body_received_bytes,
+                                     request.content_length - body_received_bytes, &request_io);
+        if (!server_is_running(&request_io)) goto cleanup;
+        if (count == 0) { status = 400; goto respond; }
         if (count < 0) {
-            if (errno == EINTR) continue;
-            return -1;
+            if (socket_io_timed_out()) { status = 408; goto respond; }
+            perror("receive request body");
+            goto cleanup;
         }
-        if (count == 0) { errno = EIO; return -1; }
-        sent += (size_t)count;
+        body_received_bytes += (size_t)count;
     }
 
-    return 0;
+    request.body = (struct http_slice){request_body, body_received_bytes};
+    status = 200;
+
+respond:
+    if (server_is_running(&client_response_io)) {
+        struct router_response response;
+        if (status == 200 && proxy_route != PROXY_ROUTE_LOCAL) {
+            const struct sockaddr_in *backend =
+                proxy_select_backend(proxy_config, selection, proxy_route);
+            proxy_prepare_response(backend, &request, running, &response);
+        } else if (status == 200 && route_handler_func) route_handler_func(&request, &response);
+        else router_prepare_error(&response, status, allow);
+
+        int send_result = send_prepared_response(client_fd, &response, head_request, &client_response_io);
+        int send_errno = errno;
+        if (send_result == 0) {
+            finish_response(client_fd, &client_response_io);
+        } else if (server_is_running(&client_response_io)) {
+            errno = send_errno;
+            perror("send response");
+        }
+    }
+cleanup:
+    /* Sole owner of request_body storage; request_io/client_response_io helpers never release it. */
+    free(request_body);
 }
 
 /* 0: complete, 1: EOF before completion, -1: errno describes the error. */
-static int receive_header(int fd, unsigned char *buf, size_t cap,
+static int receive_request_headers(int fd, unsigned char *buf, size_t cap,
                           size_t *received, size_t *header_end,
                           const struct io_context *io) {
     *received = 0;
@@ -113,7 +138,7 @@ static int receive_header(int fd, unsigned char *buf, size_t cap,
 
     while (*received < cap) {
         size_t previous = *received;
-        ssize_t count = receive_some(fd, buf + previous, cap - previous, io);
+        ssize_t count = receive_with_deadline(fd, buf + previous, cap - previous, io);
         if (count < 0) return -1;
         if (count == 0) return 1;
         *received += (size_t)count;
@@ -133,64 +158,9 @@ static int receive_header(int fd, unsigned char *buf, size_t cap,
 
 int recv_until_header_end(int fd, char *buf, size_t cap, size_t *out_len) {
     size_t received, header_end;
-    if (receive_header(fd, (unsigned char *)buf, cap, &received, &header_end, NULL) != 0) return -1;
+    if (receive_request_headers(fd, (unsigned char *)buf, cap, &received, &header_end, NULL) != 0) return -1;
     if (out_len) *out_len = received;
     return 0;
-}
-
-int send_all(int fd, const void *buf, size_t len) {
-    return send_bytes(fd, buf, len, NULL);
-}
-
-int parse_port(const char *arg, uint16_t *out_port) {
-    if (!arg || !out_port || !isdigit((unsigned char)arg[0])) return -1;
-    errno = 0;
-    char *endptr;
-    long value = strtol(arg, &endptr, 10);
-    if (errno == ERANGE || endptr == arg || *endptr != '\0' || value < 1 || value > 65535) return -1;
-    *out_port = (uint16_t)value;
-    return 0;
-}
-
-/* Mark fd close-on-exec so socket FDs are never inherited by CGI children. */
-static int set_cloexec(int fd) {
-    int flags = fcntl(fd, F_GETFD);
-    if (flags < 0) return -1;
-    return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
-}
-
-int open_listenfd(uint16_t port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) { perror("socket"); return -1; }
-    if (set_cloexec(fd) < 0) {
-        perror("listener cloexec");
-        close(fd);
-        return -1;
-    }
-
-    const int enabled = 1;
-    const struct timeval timeout = {.tv_sec = IO_CALL_TIMEOUT_SECONDS, .tv_usec = 0};
-    /* Bound accept as well, so a pre-call shutdown signal cannot strand it. */
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) < 0 ||
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-        perror("listener options");
-        close(fd);
-        return -1;
-    }
-
-    const struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(port),
-        .sin_addr = {.s_addr = htonl(INADDR_ANY)}
-    };
-    if (bind(fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("bind"); close(fd); return -1;
-    }
-    if (listen(fd, LISTEN_BACKLOG) < 0) {
-        perror("listen"); close(fd); return -1;
-    }
-
-    return fd;
 }
 
 /* Stream exactly length bytes from provider; fail with EIO on short/oversized/null chunks. */
@@ -209,7 +179,7 @@ static int send_body(int fd, struct body_provider *provider, size_t length,
             errno = EIO;
             return -1;
         }
-        if (send_bytes(fd, chunk.data, chunk.length, io) < 0) return -1;
+        if (send_all_with_deadline(fd, chunk.data, chunk.length, io) < 0) return -1;
         remaining -= chunk.length;
     }
     return 0;
@@ -222,7 +192,13 @@ static int send_chunked_body(int fd, struct body_provider *provider,
         struct http_slice chunk = {0};
         errno = 0;
         enum body_result result = provider->next_func(provider->state, &chunk);
-        if (result == BODY_END) return send_bytes(fd, "0\r\n\r\n", 5, io);
+        if (result == BODY_END) {
+            if (send_all_with_deadline(fd, "0\r\n", 3, io) < 0) return -1;
+            if (provider->trailers && provider->trailers->length &&
+                send_all_with_deadline(fd, provider->trailers->data,
+                                        provider->trailers->length, io) < 0) return -1;
+            return send_all_with_deadline(fd, "\r\n", 2, io);
+        }
         if (result != BODY_DATA) {
             if (result != BODY_ERROR || errno == 0) errno = EIO;
             return -1;
@@ -239,9 +215,9 @@ static int send_chunked_body(int fd, struct body_provider *provider,
             return -1;
         }
 
-        if (send_bytes(fd, prefix, (size_t)count, io) < 0) return -1;
-        if (send_bytes(fd, chunk.data, chunk.length, io) < 0) return -1;
-        if (send_bytes(fd, "\r\n", 2, io) < 0) return -1;
+        if (send_all_with_deadline(fd, prefix, (size_t)count, io) < 0) return -1;
+        if (send_all_with_deadline(fd, chunk.data, chunk.length, io) < 0) return -1;
+        if (send_all_with_deadline(fd, "\r\n", 2, io) < 0) return -1;
     }
 }
 
@@ -276,7 +252,7 @@ static int send_response(int fd, int status, const char *type,
     }
     if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
 
-    if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
+    if (send_all_with_deadline(fd, header, (size_t)count, io) < 0) return -1;
     if (head_request) return 0;
 
     return chunked ? send_chunked_body(fd, provider, io)
@@ -286,9 +262,19 @@ static int send_response(int fd, int status, const char *type,
 /* Takes responsibility for provider cleanup, including on send failure. */
 static int send_prepared_response(int fd, struct router_response *response,
                                   bool head_request, const struct io_context *io) {
-    int result = send_response(fd, response->status, response->content_type,
+    int result;
+    if (response->wire_header.length) {
+        result = send_all_with_deadline(fd, response->wire_header.data,
+                                        response->wire_header.length, io);
+        if (result == 0)
+            result = response->chunked
+                ? send_chunked_body(fd, &response->body_provider, io)
+                : send_body(fd, &response->body_provider, response->length, io);
+    } else {
+        result = send_response(fd, response->status, response->content_type,
                                &response->body_provider, response->length,
                                response->chunked, response->allow, head_request, io);
+    }
     int send_errno = errno;
 
     if (response->body_provider.cleanup_func)
@@ -299,7 +285,7 @@ static int send_prepared_response(int fd, struct router_response *response,
 
 /* Half-close write side and drain bounded leftover client input before closing. */
 static void finish_response(int fd, const struct io_context *io) {
-    if (!active(io) || shutdown(fd, SHUT_WR) < 0) return;
+    if (!server_is_running(io) || shutdown(fd, SHUT_WR) < 0) return;
 
     struct timespec deadline;
     if (clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) return;
@@ -308,112 +294,11 @@ static void finish_response(int fd, const struct io_context *io) {
     struct io_context drain = {io->running, &deadline};
     unsigned char discard[1024];
     size_t discarded = 0;
-    while (active(&drain) && discarded < DRAIN_MAX_BYTES) {
+    while (server_is_running(&drain) && discarded < DRAIN_MAX_BYTES) {
         size_t room = DRAIN_MAX_BYTES - discarded;
         if (room > sizeof(discard)) room = sizeof(discard);
-        ssize_t count = receive_some(fd, discard, room, &drain);
+        ssize_t count = receive_with_deadline(fd, discard, room, &drain);
         if (count <= 0) break;
         discarded += (size_t)count;
     }
-}
-
-void handle_client(int connfd, const volatile sig_atomic_t *running,
-                   const struct timespec *accepted_at) {
-    unsigned char header[REQ_HEADER_MAX_BYTES];
-    unsigned char *body = NULL;
-    struct http_request request = {0};
-    router_handler route_handler_func = NULL;
-    const char *allow = NULL;
-    size_t received = 0, header_end = 0, body_received = 0;
-    bool head_request = false;
-    struct timespec header_deadline = *accepted_at;
-    header_deadline.tv_sec += HEADER_DEADLINE_SECONDS;
-    struct io_context input = {running, &header_deadline};
-    const struct io_context output = {running, NULL};
-    int status = 0;
-
-    if (set_cloexec(connfd) < 0) {
-        perror("client cloexec");
-        goto cleanup;
-    }
-
-    int result = receive_header(connfd, header, sizeof(header),
-                                &received, &header_end, &input);
-    if (!active(&input)) goto cleanup;
-    if (result == 1) {
-        if (received == 0) goto cleanup;
-        status = 400;
-        goto respond;
-    }
-    if (result < 0) {
-        if (errno == EMSGSIZE) status = 431;
-        else if (timed_out()) status = 408;
-        else { perror("receive header"); goto cleanup; }
-        goto respond;
-    }
-
-    struct timespec body_deadline;
-    if (clock_gettime(CLOCK_MONOTONIC, &body_deadline) < 0) {
-        status = 500;
-        goto respond;
-    }
-    body_deadline.tv_sec += BODY_DEADLINE_SECONDS;
-
-    status = http_parse_request(header, header_end, &request);
-    head_request = http_slice_equal(request.method, "HEAD");
-    if (status) goto respond;
-    status = http_select_handler(&request, &route_handler_func, &allow);
-    if (status) goto respond;
-
-    if (request.content_length) {
-        body = malloc(request.content_length);
-        if (!body) { status = 500; goto respond; }
-        body_received = received - header_end;
-        if (body_received > request.content_length) body_received = request.content_length;
-        memcpy(body, header + header_end, body_received);
-    }
-
-    if (request.expect_continue && body_received < request.content_length) {
-        static const char interim[] = "HTTP/1.1 100 Continue\r\n\r\n";
-        if (send_bytes(connfd, interim, sizeof(interim) - 1, &output) < 0) {
-            if (active(&output)) perror("send 100 Continue");
-            goto cleanup;
-        }
-    }
-
-    input.deadline = &body_deadline;
-    while (body_received < request.content_length) {
-        ssize_t count = receive_some(connfd, body + body_received,
-                                     request.content_length - body_received, &input);
-        if (!active(&input)) goto cleanup;
-        if (count == 0) { status = 400; goto respond; }
-        if (count < 0) {
-            if (timed_out()) { status = 408; goto respond; }
-            perror("receive body");
-            goto cleanup;
-        }
-        body_received += (size_t)count;
-    }
-
-    request.body = (struct http_slice){body, body_received};
-    status = 200;
-
-respond:
-    if (active(&output)) {
-        struct router_response response;
-        if (status == 200 && route_handler_func) route_handler_func(&request, &response);
-        else router_prepare_error(&response, status, allow);
-
-        int send_result = send_prepared_response(connfd, &response, head_request, &output);
-        int send_errno = errno;
-        if (send_result == 0) {
-            finish_response(connfd, &output);
-        } else if (active(&output)) {
-            errno = send_errno;
-            perror("send response");
-        }
-    }
-cleanup:
-    /* Sole owner of body storage; input/output helpers never release it. */
-    free(body);
 }
