@@ -1,5 +1,34 @@
 # jungle-week-13-c-web-server
 
+> 현재 코드: Iteration 3 기반의 Iteration 4 Reverse Proxy 개인 초안.
+> 아래 기존 Iteration 2 설명·경로·검증 기록은 과거 기준이며 현재 전체 구현 상태를 나타내지 않는다.
+> 최신 흐름·제한·검증 상태는 [Iteration 4 코드 읽기](docs/iteration-4/jaeseong/iteration-4-walkthrough.md)를 우선 참고한다.
+
+## 현재 실행 — Iteration 4
+
+Ubuntu WSL2의 저장소 루트에서 `make` 후 실행한다. 테스트 백엔드는 각기 별도 터미널에서 실행한다.
+
+```sh
+python3 scripts/iteration4_backend.py --port 8001 --role submission --id submission
+python3 scripts/iteration4_backend.py --port 8002 --role status --id A
+python3 scripts/iteration4_backend.py --port 8003 --role status --id B
+```
+
+```sh
+./build/server 8080 127.0.0.1:8001 127.0.0.1:8002 127.0.0.1:8003
+```
+
+- `POST /api/submissions` → 제출 서버. `GET /api/submission-status` → 조회 A/B 라운드로빈.
+- 경로·query·본문 바이트 보존, 백엔드 무진행 제한 1초, 자동 재시도 없음.
+- 기존 `/hello`, `/echo`, `/cafe`, `/menu`, `/assets/...`, `/greet`, `/cgi-bin/...` 유지.
+- 요청은 기존 Content-Length·64KiB 상한으로 수신 완료 후 전달, 응답은 스트리밍.
+- 기존 `./build/server 8080`은 프록시 없이 로컬 서빙만 한다.
+- 정적 루트 `public`은 여전히 작업 디렉터리 기준 고정이다.
+- C 컴파일·공식 검증은 미확인/보류, 성능 측정은 미실행. Ubuntu 디스크 부재와 컴파일 도구 부재로 이번 C 빌드 확인은 하지 못했다.
+- `make test`, `make verify`, `make verify-proxy`는 검증 범위 확정 후 실행할 후보 명령이다.
+
+## 이전 Iteration 2 기록
+
 C/POSIX HTTP 서버의 개인 Iteration 2 구현이다. 팀 공통 범위는 docs/DEVELOPMENT_CONTEXT.md와 Issue #2, 개인 선택은 PLAN.md 및 docs/iteration-2/Snoopykid/를 참고한다.
 
 ## 실행

@@ -36,3 +36,22 @@
 
 - 공식 기능·회귀 검증: 미실행.
 - 성능 측정·비교 실험: 미실행, 별도 허락 필요.
+
+## 프록시 가독성 리팩터링의 유지 기준 (구현 전)
+
+- public `proxy_parse_endpoint`·`proxy_select_route`·`proxy_forward`의 인자·반환 계약 유지.
+- 요청/응답 헤더 바이트, Connection 지명 필드 제거, 중복 필드 순서, chunk/EOF/고정 길이 종료 판정은 기존 프록시 테스트 기대값 그대로 유지.
+- 조회 순번 갱신 시점·실패 시 순번·재시도 없음 유지.
+- 백엔드 1초·클라이언트 5초·8KiB 버퍼·wire 추가 256바이트와 기존 한도 유지.
+- 첫 client 송신 시도 이후 새 오류 응답 금지, backend 단일 close와 client flags 복원, client FD는 main 소유 유지.
+- main/server/router/http/handlers, 기존 단위·E2E 소스는 수정하지 않음. 새 파일 연결을 위한 Makefile과 이번 프록시 단위 테스트만 조정.
+- 공식 테스트·sanitizer·E2E·성능 실행은 이번 리팩터링 요청만으로 재개하지 않음.
+
+## 2026-11-24 구현 초안 확인
+
+- 추가: `test_proxy` 단위 계약, `verify_iter4.py` 기능 fixture·중계·장애·FD 회복·종료 후보.
+- `make test`는 기존 5개 + 프록시 단위 테스트를 실행한다. `make verify`는 기존 회귀, `make verify-proxy`는 별도 신규 기능 검증이다.
+- 새 Python 파일 2개는 AST 구문 확인 성공. 실행 결과가 아니다.
+- C 컴파일·링크: 미확인. Ubuntu는 ext4.vhdx 부재로 기동 실패, Debian에는 gcc·make·python3가 없음.
+- 단위·sanitizer·E2E: 미실행. 검증 범위 확정 보류 유지.
+- FD·timeout·SIGPIPE·시그널 종료의 실제 성공 여부와 부모 #4 전체 요구 충족은 아직 판정하지 않는다.

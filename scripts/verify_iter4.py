@@ -7,11 +7,11 @@
 import contextlib
 import http.client
 import io
-import os
 from pathlib import Path
 import signal
 import socket
 import socketserver
+import struct
 import subprocess
 import threading
 import time
@@ -273,6 +273,7 @@ def main():
 
             # 읽지 않고 즉시 닫는 클라이언트. 이후 정상 응답과 FD 회수를 확인한다.
             with socket.create_connection(("127.0.0.1", port), timeout=5) as abandoned:
+                abandoned.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
                 abandoned.sendall(b"GET /api/submission-status HTTP/1.1\r\nHost: local\r\n\r\n")
 
             for case in ("chunked", "eof", "interim", "no-content", "not-modified"):
@@ -341,11 +342,14 @@ def main():
         # 실제 중계 대기 도중 SIGTERM: 신호가 poll을 깨우고 backend FD를 정리해야 한다.
         with proxy(endpoints) as (proc, port):
             with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+                with a.lock, b.lock:
+                    previous_a, previous_b = len(a.events), len(b.events)
                 client.sendall(b"GET /api/submission-status?case=silent HTTP/1.1\r\nHost: local\r\n\r\n")
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline:
                     with a.lock, b.lock:
-                        waiting = any(event[1].endswith(b"case=silent") for event in a.events[-1:] + b.events[-1:])
+                        waiting = any(event[1].endswith(b"case=silent")
+                                      for event in a.events[previous_a:] + b.events[previous_b:])
                     if waiting:
                         break
                     time.sleep(0.01)

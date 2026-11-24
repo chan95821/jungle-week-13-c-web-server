@@ -1,3 +1,13 @@
+# 2026-11-24 현재 브랜치 — Iteration 4 초안
+
+- 대상: `team/jaeseong/iteration-4-reverse-proxy-25`. 아래 과거 기록의 개인 브랜치·명령·판정은 현재 코드 검증 증거가 아니다.
+- 직접 확인: 신규 Python 파일 2개 AST 구문 파싱 성공, Git 공백 오류 검사 성공.
+- C 컴파일·링크: 미확인. Ubuntu 기동은 ext4.vhdx 부재 오류, Debian에서 기존 gcc·make·python3를 찾지 못했다.
+- `make test`, `make verify`, `make verify-proxy`, sanitizer 및 서버·백엔드 실행: 미실행. 기존 공식 검증 보류 유지.
+- 기능·FD 회수·타임아웃·불완전 응답의 실행 결과는 아직 통과·실패 판정하지 않았다.
+- 성능·부하·후보 비교: 구현·실행하지 않았다. 부모 #4 필수 조건 원문 확인도 남아 있다.
+- 범위 확정 후보와 한계: `docs/iteration-4/jaeseong/iteration-4-tests.md`, `iteration-4-walkthrough.md`.
+
 # Iteration 1 공식 검증 범위 제안 — 현재 팀 기준 구현
 
 > 이 문서는 2단계 구현 전 팀 기준의 검증 검토 이력이다. 여기서 미구현으로 적힌 431·타임아웃 등은 이후 2단계 선택에 따라 소스에 추가됐다. 아직 공식 실행·통과를 확인한 것은 아니다. 현재 구현과 제안 검증 범위는 docs/iteration-2/Snoopykid/iteration-2-tests.md 및 README.md를 따른다.
