@@ -47,6 +47,14 @@
 - main/server/router/http/handlers, 기존 단위·E2E 소스는 수정하지 않음. 새 파일 연결을 위한 Makefile과 이번 프록시 단위 테스트만 조정.
 - 공식 테스트·sanitizer·E2E·성능 실행은 이번 리팩터링 요청만으로 재개하지 않음.
 
+### 리팩터링 후 확인 상태
+
+- 작업 전 사본과 비교: 프록시 public 헤더·기존 서버/HTTP/라우터/핸들러·기존 단위 테스트·E2E 등 23개 파일이 바이트 단위 동일.
+- 프록시 단위 테스트는 함수·구조체·필드 이름 변경을 정규화한 뒤 토큰 비교했으며, 기존 사례와 기대 문자열·바이트·판정이 동일. 실행한 결과가 아니다.
+- 일반·sanitizer 컴파일 옵션 CFLAGS/ASAN_FLAGS 유지. Makefile은 분리한 프록시 소스·헤더 및 프록시 테스트 링크만 조정.
+- 컴파일 시도: `make all test_parse_port test_recv_header test_send_all test_http_parser test_body_send test_proxy`를 Ubuntu에서 실행하려 했으나 WSL MountVhd/ERROR_FILE_NOT_FOUND로 make에 도달하지 못함. C 컴파일·링크 결과는 미확인.
+- 단위·sanitizer·E2E·성능 실행은 하지 않음. 기존 공식 검증 보류 유지.
+
 ## 2026-11-24 구현 초안 확인
 
 - 추가: `test_proxy` 단위 계약, `verify_iter4.py` 기능 fixture·중계·장애·FD 회복·종료 후보.
