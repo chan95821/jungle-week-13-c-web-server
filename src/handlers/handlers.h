@@ -19,6 +19,16 @@ void prepare_greet(const struct http_request *request,
 void prepare_cgi(const struct http_request *request,
                  struct router_response *response);
 
+/* GET /api/hello 요청을 설정의 단일 백엔드로 공통 프록시에 위임한다(부모 이슈 #4 확인용). */
+void prepare_hello_proxy(const struct http_request *request,
+                         struct router_response *response);
+/* POST /api/submissions 요청을 설정이 확정한 제출 백엔드로 공통 프록시에 위임한다. */
+void prepare_submission_proxy(const struct http_request *request,
+                              struct router_response *response);
+/* GET /api/submission-status 요청을 설정이 확정한 조회 그룹으로 공통 프록시에 위임한다. */
+void prepare_submission_status_proxy(const struct http_request *request,
+                                     struct router_response *response);
+
 /* Shared helpers defined in src/router.c. */
 /* Prepare response from caller-owned or static storage (cleanup_func is NULL). */
 void router_prepare_borrowed_memory(struct router_response *response,

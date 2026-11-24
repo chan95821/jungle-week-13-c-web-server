@@ -1,5 +1,6 @@
 #include "router.h"
 #include "handlers/handlers.h"
+#include "proxy.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -101,17 +102,21 @@ struct route_rule {
     const char *method;
     enum route_match match;
     router_handler route_handler_func;
+    int (*validate_request)(const struct http_request *request);
 };
 
 static const struct route_rule routes[] = {
-    {"/", "GET", ROUTE_EXACT, prepare_hello},
-    {"/hello", "GET", ROUTE_EXACT, prepare_hello},
-    {"/echo", "POST", ROUTE_EXACT, prepare_echo},
-    {"/cafe", "GET", ROUTE_EXACT, prepare_cafe},
-    {"/menu", "GET", ROUTE_EXACT, prepare_menu},
-    {"/assets/", "GET", ROUTE_PREFIX, prepare_assets},
-    {"/greet", "GET", ROUTE_EXACT, prepare_greet},
-    {"/cgi-bin/", "GET", ROUTE_PREFIX, prepare_cgi},
+    {"/", "GET", ROUTE_EXACT, prepare_hello, NULL},
+    {"/hello", "GET", ROUTE_EXACT, prepare_hello, NULL},
+    {"/echo", "POST", ROUTE_EXACT, prepare_echo, NULL},
+    {"/cafe", "GET", ROUTE_EXACT, prepare_cafe, NULL},
+    {"/menu", "GET", ROUTE_EXACT, prepare_menu, NULL},
+    {"/assets/", "GET", ROUTE_PREFIX, prepare_assets, NULL},
+    {"/greet", "GET", ROUTE_EXACT, prepare_greet, NULL},
+    {"/cgi-bin/", "GET", ROUTE_PREFIX, prepare_cgi, NULL},
+    {"/api/hello", "GET", ROUTE_EXACT, prepare_hello_proxy, validate_proxy_headers},
+    {"/api/submissions", "POST", ROUTE_EXACT, prepare_submission_proxy, validate_proxy_headers},
+    {"/api/submission-status", "GET", ROUTE_EXACT, prepare_submission_status_proxy, validate_proxy_headers},
 };
 
 /* Return true when path starts with the literal prefix rule. */
@@ -168,10 +173,13 @@ static int select_rule(const struct http_request *r,
     return 405;
 }
 
+/* select_rule()로 라우트를 고른 뒤, 등록된 사전 검증(validate_request)을 바디 수신 전에 실행한다.
+ * 성공(0) 시에만 *route_handler_func를 채우고, 실패(400/404/405/501) 시 NULL로 둔다(405는 allow 설정). */
 int http_select_handler(const struct http_request *request,
                         router_handler *route_handler_func, const char **allow) {
     const struct route_rule *selected;
     int status = select_rule(request, &selected, allow);
+    if (!status && selected->validate_request) status = selected->validate_request(request);
     *route_handler_func = status ? NULL : selected->route_handler_func;
     return status;
 }

@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
 #include "router.h"
+#include "io_utils.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -15,120 +16,26 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-struct io_context {
-    const volatile sig_atomic_t *running;
-    const struct timespec *deadline;
-};
-
-/* Check whether server shutdown has not been requested. */
-static bool active(const struct io_context *io) {
-    return !io || !io->running || *io->running != 0;
-}
-
-/* Return true when monotonic clock has reached or passed deadline. */
-static bool deadline_passed(const struct timespec *now, const struct timespec *deadline) {
-    return now->tv_sec > deadline->tv_sec ||
-           (now->tv_sec == deadline->tv_sec && now->tv_nsec >= deadline->tv_nsec);
-}
-
-/* A positive, rounded-up timeout: zero would disable SO_*TIMEO entirely. */
-static int set_call_timeout(int fd, int option, const struct io_context *io) {
-    if (!io) return 0;
-    if (!active(io)) { errno = ECANCELED; return -1; }
-
-    struct timeval timeout = {.tv_sec = IO_CALL_TIMEOUT_SECONDS, .tv_usec = 0};
-    if (io->deadline) {
-        struct timespec now;
-        if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
-        if (deadline_passed(&now, io->deadline)) { errno = ETIMEDOUT; return -1; }
-
-        time_t seconds = io->deadline->tv_sec - now.tv_sec;
-        long nanoseconds = io->deadline->tv_nsec - now.tv_nsec;
-        if (nanoseconds < 0) { --seconds; nanoseconds += 1000000000L; }
-
-        if (seconds < IO_CALL_TIMEOUT_SECONDS) {
-            timeout.tv_sec = seconds;
-            timeout.tv_usec = (nanoseconds + 999L) / 1000L;
-            if (timeout.tv_usec == 1000000L) {
-                ++timeout.tv_sec;
-                timeout.tv_usec = 0;
-            }
-        }
-    }
-
-    return setsockopt(fd, SOL_SOCKET, option, &timeout, sizeof(timeout));
-}
-
 /* Identify socket timeout errors across SO_RCVTIMEO/SO_SNDTIMEO implementations. */
 static bool timed_out(void) {
     return errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
-/* Receive up to len bytes while honoring io cancellation, EINTR, and deadline. */
+/* 기존 수신 진입점. 바이트 수신·취소·마감 처리는 공통 유틸을 사용한다. */
 static ssize_t receive_some(int fd, void *buf, size_t len, const struct io_context *io) {
-    for (;;) {
-        if (set_call_timeout(fd, SO_RCVTIMEO, io) < 0) return -1;
-        ssize_t count = recv(fd, buf, len, 0);
-        if (!active(io)) { errno = ECANCELED; return -1; }
-        if (count < 0 && errno == EINTR) continue;
-        if (count > 0 && io && io->deadline) {
-            struct timespec now;
-            if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
-            if (deadline_passed(&now, io->deadline)) { errno = ETIMEDOUT; return -1; }
-        }
-        return count;
-    }
+    return receive_socket_bytes(fd, buf, len, io);
 }
 
-/* Send all len bytes, retrying short writes and EINTR. Return 0 or -1. */
+/* 기존 서버 송신 진입점. 완전 송신과 I/O 제어는 공통 유틸을 사용한다. */
 static int send_bytes(int fd, const void *buf, size_t len, const struct io_context *io) {
-    if (len == 0) return 0;
-    if (!buf) { errno = EINVAL; return -1; }
-
-    const unsigned char *data = buf;
-    size_t sent = 0;
-    while (sent < len) {
-        if (set_call_timeout(fd, SO_SNDTIMEO, io) < 0) return -1;
-
-        ssize_t count = send(fd, data + sent, len - sent, 0);
-        if (!active(io)) { errno = ECANCELED; return -1; }
-        if (count < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        if (count == 0) { errno = EIO; return -1; }
-        sent += (size_t)count;
-    }
-
-    return 0;
+    return send_all_bytes(fd, buf, len, io);
 }
 
 /* 0: complete, 1: EOF before completion, -1: errno describes the error. */
 static int receive_header(int fd, unsigned char *buf, size_t cap,
                           size_t *received, size_t *header_end,
                           const struct io_context *io) {
-    *received = 0;
-    *header_end = 0;
-    if (!buf || cap < 4) { errno = EINVAL; return -1; }
-
-    while (*received < cap) {
-        size_t previous = *received;
-        ssize_t count = receive_some(fd, buf + previous, cap - previous, io);
-        if (count < 0) return -1;
-        if (count == 0) return 1;
-        *received += (size_t)count;
-
-        size_t start = previous > 3 ? previous - 3 : 0;
-        for (size_t i = start; i + 4 <= *received; ++i) {
-            if (memcmp(buf + i, "\r\n\r\n", 4) == 0) {
-                *header_end = i + 4;
-                return 0;
-            }
-        }
-    }
-
-    errno = EMSGSIZE;
-    return -1;
+    return receive_http_headers(fd, buf, cap, received, header_end, io);
 }
 
 int recv_until_header_end(int fd, char *buf, size_t cap, size_t *out_len) {
@@ -152,17 +59,10 @@ int parse_port(const char *arg, uint16_t *out_port) {
     return 0;
 }
 
-/* Mark fd close-on-exec so socket FDs are never inherited by CGI children. */
-static int set_cloexec(int fd) {
-    int flags = fcntl(fd, F_GETFD);
-    if (flags < 0) return -1;
-    return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
-}
-
 int open_listenfd(uint16_t port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) { perror("socket"); return -1; }
-    if (set_cloexec(fd) < 0) {
+    if (set_fd_close_on_exec(fd) < 0) {
         perror("listener cloexec");
         close(fd);
         return -1;
@@ -245,8 +145,10 @@ static int send_chunked_body(int fd, struct body_provider *provider,
     }
 }
 
-/* Format and send HTTP status line, headers, and fixed-length or chunked body. */
+/* 상태 줄·Content-Type·Allow를 보내고, 준비된 추가 헤더가 있으면 이어서 보낸다.
+ * 길이·연결 헤더는 마지막에 붙여, 프록시가 만든 헤더와 중복되지 않게 한다. */
 static int send_response(int fd, int status, const char *type,
+                         const unsigned char *extra_headers, size_t extra_length,
                          struct body_provider *provider, size_t length,
                          bool chunked, const char *allow,
                          bool head_request, const struct io_context *io) {
@@ -257,28 +159,28 @@ static int send_response(int fd, int status, const char *type,
         if (count < 0 || (size_t)count >= sizeof(allow_line)) { errno = EOVERFLOW; return -1; }
     }
 
-    int count;
-    if (head_request) {
-        /* HEAD is unsupported (501), but must not carry response content. */
-        count = snprintf(header, sizeof(header),
-                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%sConnection: close\r\n\r\n",
+    /* 204·304는 본문을 가질 수 없고 204는 Content-Length도 보내면 안 된다. */
+    bool bodiless_status = status == 204 || status == 304;
+    int count = snprintf(header, sizeof(header), "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%s",
                          status, http_reason(status), type, allow_line);
+    if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
+    if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
+    if (extra_length && send_bytes(fd, extra_headers, extra_length, io) < 0) return -1;
+
+    if (head_request || bodiless_status) {
+        /* HEAD(501)와 본문 없는 상태는 헤더까지만 보내고 내용을 붙이지 않는다. */
+        count = snprintf(header, sizeof(header), "Connection: close\r\n\r\n");
     } else if (chunked) {
         count = snprintf(header, sizeof(header),
-                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nTransfer-Encoding: chunked\r\n"
-                         "%sConnection: close\r\n\r\n",
-                         status, http_reason(status), type, allow_line);
+                         "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
     } else {
         count = snprintf(header, sizeof(header),
-                         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-                         "%sConnection: close\r\n\r\n",
-                         status, http_reason(status), type, length, allow_line);
+                         "Content-Length: %zu\r\nConnection: close\r\n\r\n", length);
     }
     if (count < 0 || (size_t)count >= sizeof(header)) { errno = EOVERFLOW; return -1; }
-
     if (send_bytes(fd, header, (size_t)count, io) < 0) return -1;
-    if (head_request) return 0;
 
+    if (head_request || bodiless_status) return 0;
     return chunked ? send_chunked_body(fd, provider, io)
                    : send_body(fd, provider, length, io);
 }
@@ -287,6 +189,7 @@ static int send_response(int fd, int status, const char *type,
 static int send_prepared_response(int fd, struct router_response *response,
                                   bool head_request, const struct io_context *io) {
     int result = send_response(fd, response->status, response->content_type,
+                               response->headers, response->headers_length,
                                &response->body_provider, response->length,
                                response->chunked, response->allow, head_request, io);
     int send_errno = errno;
@@ -299,7 +202,7 @@ static int send_prepared_response(int fd, struct router_response *response,
 
 /* Half-close write side and drain bounded leftover client input before closing. */
 static void finish_response(int fd, const struct io_context *io) {
-    if (!active(io) || shutdown(fd, SHUT_WR) < 0) return;
+    if (!io_is_active(io) || shutdown(fd, SHUT_WR) < 0) return;
 
     struct timespec deadline;
     if (clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) return;
@@ -308,7 +211,7 @@ static void finish_response(int fd, const struct io_context *io) {
     struct io_context drain = {io->running, &deadline};
     unsigned char discard[1024];
     size_t discarded = 0;
-    while (active(&drain) && discarded < DRAIN_MAX_BYTES) {
+    while (io_is_active(&drain) && discarded < DRAIN_MAX_BYTES) {
         size_t room = DRAIN_MAX_BYTES - discarded;
         if (room > sizeof(discard)) room = sizeof(discard);
         ssize_t count = receive_some(fd, discard, room, &drain);
@@ -332,14 +235,14 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     const struct io_context output = {running, NULL};
     int status = 0;
 
-    if (set_cloexec(connfd) < 0) {
+    if (set_fd_close_on_exec(connfd) < 0) {
         perror("client cloexec");
         goto cleanup;
     }
 
     int result = receive_header(connfd, header, sizeof(header),
                                 &received, &header_end, &input);
-    if (!active(&input)) goto cleanup;
+    if (!io_is_active(&input)) goto cleanup;
     if (result == 1) {
         if (received == 0) goto cleanup;
         status = 400;
@@ -376,7 +279,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     if (request.expect_continue && body_received < request.content_length) {
         static const char interim[] = "HTTP/1.1 100 Continue\r\n\r\n";
         if (send_bytes(connfd, interim, sizeof(interim) - 1, &output) < 0) {
-            if (active(&output)) perror("send 100 Continue");
+            if (io_is_active(&output)) perror("send 100 Continue");
             goto cleanup;
         }
     }
@@ -385,7 +288,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     while (body_received < request.content_length) {
         ssize_t count = receive_some(connfd, body + body_received,
                                      request.content_length - body_received, &input);
-        if (!active(&input)) goto cleanup;
+        if (!io_is_active(&input)) goto cleanup;
         if (count == 0) { status = 400; goto respond; }
         if (count < 0) {
             if (timed_out()) { status = 408; goto respond; }
@@ -399,7 +302,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     status = 200;
 
 respond:
-    if (active(&output)) {
+    if (io_is_active(&output)) {
         struct router_response response;
         if (status == 200 && route_handler_func) route_handler_func(&request, &response);
         else router_prepare_error(&response, status, allow);
@@ -408,7 +311,7 @@ respond:
         int send_errno = errno;
         if (send_result == 0) {
             finish_response(connfd, &output);
-        } else if (active(&output)) {
+        } else if (io_is_active(&output)) {
             errno = send_errno;
             perror("send response");
         }

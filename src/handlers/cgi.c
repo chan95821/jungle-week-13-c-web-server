@@ -1,5 +1,6 @@
 #define _XOPEN_SOURCE 700
 #include "handlers.h"
+#include "../io_utils.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -28,45 +29,6 @@ struct cgi_body {
     size_t initial_len;
     unsigned char buffer[CGI_CHUNK_BUFFER_SIZE];
 };
-
-/* Compute monotonic clock deadline timeout_ms milliseconds ahead. */
-static bool make_deadline(struct timespec *deadline, int timeout_ms) {
-    if (clock_gettime(CLOCK_MONOTONIC, deadline) < 0) return false;
-    deadline->tv_sec += timeout_ms / 1000;
-    deadline->tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
-    if (deadline->tv_nsec >= 1000000000L) {
-        ++deadline->tv_sec;
-        deadline->tv_nsec -= 1000000000L;
-    }
-    return true;
-}
-
-/* Wait via poll() until fd is readable or deadline expires. Return 0 or -1 (ETIMEDOUT). */
-static int wait_readable(int fd, const struct timespec *deadline) {
-    for (;;) {
-        struct timespec now;
-        if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
-        long sec = (long)(deadline->tv_sec - now.tv_sec);
-        long nsec = deadline->tv_nsec - now.tv_nsec;
-        long long remaining_ms = (long long)sec * 1000LL + (nsec + 999999L) / 1000000L;
-        if (remaining_ms <= 0) {
-            errno = ETIMEDOUT;
-            return -1;
-        }
-        int timeout = remaining_ms > INT32_MAX ? INT32_MAX : (int)remaining_ms;
-        struct pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
-        int ready = poll(&pfd, 1, timeout);
-        if (ready < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        if (ready == 0) {
-            errno = ETIMEDOUT;
-            return -1;
-        }
-        return 0;
-    }
-}
 
 static bool is_token_char_cgi(unsigned char c) {
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
@@ -216,8 +178,8 @@ static enum body_result cgi_body_next(void *state, struct http_slice *chunk) {
     if (cgi->eof_reached) return BODY_END;
 
     struct timespec deadline;
-    if (!make_deadline(&deadline, CGI_READ_TIMEOUT_MS)) return BODY_ERROR;
-    if (wait_readable(cgi->fd, &deadline) < 0) return BODY_ERROR;
+    if (!make_io_deadline(&deadline, CGI_READ_TIMEOUT_MS)) return BODY_ERROR;
+    if (wait_fd_ready(cgi->fd, POLLIN, &deadline) < 0) return BODY_ERROR;
 
     ssize_t count;
     do {
@@ -404,7 +366,7 @@ static int read_cgi_header(struct cgi_body *cgi, int *status_out) {
     unsigned char raw[CGI_HEADER_MAX_BYTES];
     size_t used = 0;
     struct timespec deadline;
-    if (!make_deadline(&deadline, CGI_READ_TIMEOUT_MS)) return 500;
+    if (!make_io_deadline(&deadline, CGI_READ_TIMEOUT_MS)) return 500;
 
     for (;;) {
         size_t sep_len = 0;
@@ -423,7 +385,7 @@ static int read_cgi_header(struct cgi_body *cgi, int *status_out) {
         }
 
         if (used == sizeof(raw)) return 502;
-        if (wait_readable(cgi->fd, &deadline) < 0) return 502;
+        if (wait_fd_ready(cgi->fd, POLLIN, &deadline) < 0) return 502;
 
         ssize_t count;
         do {

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
+#include "proxy_config.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -29,10 +30,11 @@ static int setup_signals(void) {
     return sigaction(SIGPIPE, &stop, NULL);
 }
 
-/* Validate port and static root "public", then serve accepted connections sequentially. */
+/* Validate port, optional routes config and static root "public",
+ * then serve accepted connections sequentially. */
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "Usage: %s <port> [routes.conf]\n", argv[0]);
         return 1;
     }
     uint16_t port;
@@ -40,6 +42,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Invalid port: %s\n", argv[1]);
         return 1;
     }
+
+    /* 설정 파일을 주지 않으면 내장 기본값(8001/8002/8003)을 쓴다. */
+    if (proxy_config_init(argc == 3 ? argv[2] : NULL) < 0) return 1;
 
     struct stat root;
     if (stat("public", &root) < 0) {

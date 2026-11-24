@@ -34,6 +34,31 @@ static void valid_request(void) {
     assert(http_select_handler(&request, &route_handler_func, &allow) == 0 && route_handler_func);
 }
 
+/* Check that iteration exposes validated fields in order without modifying the input. */
+static void request_header_order(void) {
+    unsigned char wire[] = "GET / HTTP/1.1\r\nX-Demo:\tfirst \t\r\nHost: localhost\r\n"
+                           "Connection: close, x-demo\r\nx-demo: second\r\nEmpty:\r\n\r\n";
+    unsigned char original[sizeof(wire)];
+    memcpy(original, wire, sizeof(wire));
+    struct http_request request;
+    assert(http_parse_request(wire, sizeof(wire) - 1, &request) == 0);
+
+    static const struct { const char *name; const char *value; } expected[] = {
+        {"X-Demo", "first"}, {"Host", "localhost"},
+        {"Connection", "close, x-demo"}, {"x-demo", "second"}, {"Empty", ""}
+    };
+    struct http_slice cursor = request.headers;
+    struct http_slice name, value;
+    for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+        assert(http_header_next(&cursor, &name, &value));
+        assert(http_slice_equal(name, expected[i].name));
+        assert(http_slice_equal(value, expected[i].value));
+        assert(name.data >= wire && name.data < wire + sizeof(wire));
+    }
+    assert(!http_header_next(&cursor, &name, &value));
+    assert(memcmp(wire, original, sizeof(wire)) == 0);
+}
+
 static void basic_statuses(void) {
     static const struct { const char *wire; int status; } cases[] = {
         {"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", 0},
@@ -736,6 +761,7 @@ static void cgi_responses_and_boundaries(void) {
 
 int main(void) {
     valid_request();
+    request_header_order();
     basic_statuses();
     routes();
     response_selection();

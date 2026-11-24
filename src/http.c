@@ -61,6 +61,26 @@ static size_t crlf(const unsigned char *data, size_t length) {
     return SIZE_MAX;
 }
 
+/* 검증된 request.headers 커서에서 다음 헤더의 name/value 슬라이스를 원문 버퍼에서 빌려 온다.
+ * value 앞뒤 OWS(SP/HTAB)만 제거하며, 성공 시에만 cursor를 다음 줄(\r\n 뒤)로 전진시킨다.
+ * 원문 버퍼 수명에 의존하고 수정·할당·재검증은 하지 않는다. */
+bool http_header_next(struct http_slice *cursor, struct http_slice *name,
+                      struct http_slice *value) {
+    if (!cursor->length) return false;
+
+    const unsigned char *line = cursor->data;
+    size_t end = crlf(line, cursor->length);
+    if (end == SIZE_MAX) return false;
+    const unsigned char *colon = memchr(line, ':', end);
+    if (!colon) return false;
+
+    *name = (struct http_slice){line, (size_t)(colon - line)};
+    *value = trim((struct http_slice){colon + 1, end - name->length - 1});
+    cursor->data += end + 2;
+    cursor->length -= end + 2;
+    return true;
+}
+
 /* Validate RFC 3986 reg-name syntax (unreserved / sub-delims / pct-encoded). */
 static bool valid_reg_name(struct http_slice name) {
     if (!name.length) return false;
@@ -302,6 +322,85 @@ static int parse_transfer(struct http_slice value, bool *last_chunked,
     return 400;
 }
 
+/* 요청·응답에서 공통으로 사용하는 헤더 한 줄 문법 검사다. CRLF는 포함하지 않는다.
+ * 성공 시 원문을 빌리는 이름·OWS 제거 값을 반환하고, 문법 오류 시 400을 반환한다. */
+static int parse_header_field(struct http_slice line, struct http_slice *name,
+                               struct http_slice *value) {
+    size_t colon = 0;
+    while (colon < line.length && line.data[colon] != ':') {
+        if (!token_char(line.data[colon])) return 400;
+        ++colon;
+    }
+    if (!colon || colon == line.length) return 400;
+
+    *name = (struct http_slice){line.data, colon};
+    *value = trim((struct http_slice){line.data + colon + 1, line.length - colon - 1});
+    for (size_t i = 0; i < value->length; ++i) {
+        unsigned char c = value->data[i];
+        if ((c < 32 && c != '\t') || c == 127) return 400;
+    }
+    return 0;
+}
+
+/* 상태 줄에서 HTTP/1.0 또는 1.1과 100~599 상태를 해석한다. reason은 표시용으로만 검증한다. */
+static int parse_response_status_line(struct http_slice line, int *status) {
+    if (line.length < 13 ||
+        (memcmp(line.data, "HTTP/1.1 ", 9) != 0 && memcmp(line.data, "HTTP/1.0 ", 9) != 0) ||
+        !digit(line.data[9]) || !digit(line.data[10]) || !digit(line.data[11]) ||
+        line.data[12] != ' ') return 502;
+    int parsed = (line.data[9] - '0') * 100 + (line.data[10] - '0') * 10 + line.data[11] - '0';
+    if (parsed < 100 || parsed > 599) return 502;
+    for (size_t i = 13; i < line.length; ++i) {
+        unsigned char c = line.data[i];
+        if ((c < 32 && c != '\t') || c == 127) return 502;
+    }
+    *status = parsed;
+    return 0;
+}
+
+/* 상태·필드 문법과 길이 숫자를 해석한다. TE 지원 여부나 본문 존재 판단은 프록시 정책에 남긴다.
+ * 중복 singleton 헤더는 모호하게 병합하지 않고 거부한다. 결과의 모든 slice는 입력 수명에 의존한다. */
+int http_parse_response_headers(const unsigned char *data, size_t length,
+                                 struct http_response_headers *response) {
+    if (!response) return 502;
+    *response = (struct http_response_headers){0};
+    if (!data || length < 4 || length > REQ_HEADER_MAX_BYTES ||
+        memcmp(data + length - 4, "\r\n\r\n", 4) != 0) return 502;
+    size_t start_line_length = crlf(data, length);
+    if (start_line_length == SIZE_MAX ||
+        parse_response_status_line((struct http_slice){data, start_line_length}, &response->status)) return 502;
+
+    size_t fields_start = start_line_length + 2;
+    size_t offset = fields_start;
+    bool type_seen = false;
+    while (offset < length) {
+        size_t end = crlf(data + offset, length - offset);
+        if (end == SIZE_MAX) return 502;
+        if (end == 0) {
+            if (offset + 2 != length) return 502;
+            break;
+        }
+        struct http_slice name, value;
+        if (parse_header_field((struct http_slice){data + offset, end}, &name, &value)) return 502;
+        if (equal_case(name, "content-length")) {
+            if (response->has_content_length || parse_length(value, &response->content_length)) return 502;
+            response->has_content_length = true;
+        } else if (equal_case(name, "content-type")) {
+            if (type_seen || value.length == 0) return 502;
+            type_seen = true;
+            response->content_type = value;
+        } else if (equal_case(name, "transfer-encoding")) {
+            response->has_transfer_encoding = true;
+        } else if (equal_case(name, "connection")) {
+            struct http_request options = {0};
+            if (parse_connection(value, &options)) return 502;
+        }
+        offset += end + 2;
+    }
+    response->headers = (struct http_slice){data + fields_start, offset - fields_start};
+    return 0;
+}
+
 int http_parse_request(const unsigned char *data, size_t length,
                        struct http_request *r) {
     if (!data || !r || length < 4) return 400;
@@ -317,7 +416,8 @@ int http_parse_request(const unsigned char *data, size_t length,
                                   &unsupported_target);
     if (status) return status;
 
-    size_t offset = line_length + 2;
+    size_t fields_start = line_length + 2;
+    size_t offset = fields_start;
     bool host_seen = false, transfer_seen = false, last_chunked = false;
     unsigned int chunked_count = 0;
     int expect_status = 0;
@@ -330,20 +430,9 @@ int http_parse_request(const unsigned char *data, size_t length,
             break;
         }
 
-        const unsigned char *line = data + offset;
-        size_t colon = 0;
-        while (colon < end && line[colon] != ':') {
-            if (!token_char(line[colon])) return 400;
-            ++colon;
-        }
-        if (!colon || colon == end) return 400;
-
-        struct http_slice name = {line, colon};
-        struct http_slice value = trim((struct http_slice){line + colon + 1, end - colon - 1});
-        for (size_t i = 0; i < value.length; ++i) {
-            unsigned char c = value.data[i];
-            if ((c < 32 && c != '\t') || c == 127) return 400;
-        }
+        struct http_slice name, value;
+        status = parse_header_field((struct http_slice){data + offset, end}, &name, &value);
+        if (status) return status;
 
         if (equal_case(name, "host")) {
             if (host_seen || !valid_host(value)) return 400;
@@ -375,12 +464,20 @@ int http_parse_request(const unsigned char *data, size_t length,
     if (r->content_length > REQ_BODY_MAX_BYTES) return 413;
     if (unsupported_target) return 501;
     if (expect_status) return expect_status;
+
+    r->headers = (struct http_slice){data + fields_start, offset - fields_start};
     return 0;
 }
 
 const char *http_reason(int status) {
     switch (status) {
     case 200: return "OK";
+    case 201: return "Created";
+    case 202: return "Accepted";
+    case 204: return "No Content";
+    case 301: return "Moved Permanently";
+    case 302: return "Found";
+    case 304: return "Not Modified";
     case 400: return "Bad Request";
     case 404: return "Not Found";
     case 405: return "Method Not Allowed";
@@ -391,6 +488,8 @@ const char *http_reason(int status) {
     case 500: return "Internal Server Error";
     case 501: return "Not Implemented";
     case 502: return "Bad Gateway";
+    case 503: return "Service Unavailable";
+    case 504: return "Gateway Timeout";
     case 505: return "HTTP Version Not Supported";
     default: return "Internal Server Error";
     }

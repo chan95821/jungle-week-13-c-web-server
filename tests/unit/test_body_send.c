@@ -323,12 +323,81 @@ static void test_chunked_streaming_and_failures(void) {
     }
 }
 
+/* 204·304는 본문 없는 상태이므로 Content-Length도 본문도 보내지 않는다. */
+static void test_bodiless_status_headers(void) {
+    static const int statuses[] = {204, 304};
+    for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); ++i) {
+        int sv[2];
+        assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+        struct response_test_body body = {.result = BODY_END, .peer = sv[1]};
+        struct router_response response = {
+            .status = statuses[i], .content_type = "text/plain",
+            .body_provider = {.next_func = response_test_next, .state = &body}
+        };
+        assert(send_prepared_response(sv[0], &response, false, NULL) == 0);
+        assert(body.calls == 0);
+        assert(shutdown(sv[0], SHUT_WR) == 0);
+
+        char wire[1024];
+        size_t used = 0;
+        ssize_t n;
+        while ((n = recv(sv[1], wire + used, sizeof(wire) - 1 - used, 0)) > 0)
+            used += (size_t)n;
+        assert(n == 0);
+        wire[used] = '\0';
+        assert(strstr(wire, "Content-Length") == NULL);
+        const char *end = strstr(wire, "\r\n\r\n");
+        assert(end != NULL && (size_t)(end + 4 - wire) == used);
+        close(sv[0]);
+        close(sv[1]);
+    }
+}
+
+/* 준비된 추가 헤더는 Content-Type 뒤, Content-Length 앞에 원래 순서대로 한 번만 나간다. */
+static void test_prepared_response_headers(void) {
+    int sv[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    struct response_test_body body = {.result = BODY_END, .peer = sv[1]};
+    static const unsigned char extra[] =
+        "Location: /next\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n";
+    struct router_response response = {
+        .status = 302, .content_type = "text/plain", .length = 0,
+        .headers = extra, .headers_length = sizeof(extra) - 1,
+        .body_provider = {.next_func = response_test_next, .state = &body}
+    };
+    assert(send_prepared_response(sv[0], &response, false, NULL) == 0);
+    assert(shutdown(sv[0], SHUT_WR) == 0);
+
+    char wire[1024];
+    size_t used = 0;
+    ssize_t n;
+    while ((n = recv(sv[1], wire + used, sizeof(wire) - 1 - used, 0)) > 0)
+        used += (size_t)n;
+    assert(n == 0);
+    wire[used] = '\0';
+
+    const char *status_line = strstr(wire, "HTTP/1.1 302 Found\r\n");
+    const char *content_type = strstr(wire, "Content-Type: text/plain\r\n");
+    const char *location = strstr(wire, "Location: /next\r\n");
+    const char *cookie_a = strstr(wire, "Set-Cookie: a=1\r\n");
+    const char *cookie_b = strstr(wire, "Set-Cookie: b=2\r\n");
+    const char *length = strstr(wire, "Content-Length: 0\r\n");
+    assert(status_line && content_type && location && cookie_a && cookie_b && length);
+    assert(status_line < content_type && content_type < location);
+    assert(location < cookie_a && cookie_a < cookie_b && cookie_b < length);
+    assert(strstr(content_type + 1, "Content-Type:") == NULL);
+    close(sv[0]);
+    close(sv[1]);
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
     test_provider_failures();
     test_length_and_send_failure();
     test_response_cleanup();
     test_chunked_streaming_and_failures();
+    test_bodiless_status_headers();
+    test_prepared_response_headers();
     puts("[PASS] test_body_send");
     return 0;
 }

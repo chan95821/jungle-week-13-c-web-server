@@ -6,11 +6,11 @@
 #include <stdint.h>
 #include <time.h>
 #include "http.h"
+#include "io_utils.h"
 
 /* Provisional policy constants; each can be reconsidered independently. */
 enum {
     LISTEN_BACKLOG = 128,
-    IO_CALL_TIMEOUT_SECONDS = 5,
     HEADER_DEADLINE_SECONDS = 7,
     BODY_DEADLINE_SECONDS = 15,
     DRAIN_DEADLINE_SECONDS = 1,

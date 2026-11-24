@@ -20,6 +20,11 @@ struct router_response {
     size_t length;
     bool chunked;
     const char *allow;
+    /* 프록시가 준비한 추가 응답 헤더 블록(각 줄 "이름: 값\r\n", 빈 줄 제외).
+     * Content-Type·Content-Length·hop-by-hop은 이미 제외돼 있고, 기존 핸들러는 NULL로 둔다.
+     * 가리키는 저장소는 body_provider 정리 시까지 유효해야 한다. */
+    const unsigned char *headers;
+    size_t headers_length;
     struct body_provider body_provider;
     struct http_slice memory_body;
 };
@@ -28,7 +33,7 @@ struct router_response {
 typedef void (*router_handler)(const struct http_request *request,
                                struct router_response *response);
 
-/* Select a route_handler_func before receiving the body; invoke it after body reception. */
+/* Match and optionally validate before body reception; return a handler only on success. */
 int http_select_handler(const struct http_request *request,
                         router_handler *route_handler_func, const char **allow);
 
