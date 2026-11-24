@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
 #include "router.h"
+#include "proxy.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -319,6 +320,12 @@ static void finish_response(int fd, const struct io_context *io) {
 
 void handle_client(int connfd, const volatile sig_atomic_t *running,
                    const struct timespec *accepted_at) {
+    handle_client_with_proxy(connfd, running, accepted_at, NULL);
+}
+
+void handle_client_with_proxy(int connfd, const volatile sig_atomic_t *running,
+                              const struct timespec *accepted_at,
+                              struct proxy_config *proxy) {
     unsigned char header[REQ_HEADER_MAX_BYTES];
     unsigned char *body = NULL;
     struct http_request request = {0};
@@ -331,6 +338,7 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     struct io_context input = {running, &header_deadline};
     const struct io_context output = {running, NULL};
     int status = 0;
+    int proxy_route = PROXY_LOCAL;
 
     if (set_cloexec(connfd) < 0) {
         perror("client cloexec");
@@ -362,7 +370,12 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     status = http_parse_request(header, header_end, &request);
     head_request = http_slice_equal(request.method, "HEAD");
     if (status) goto respond;
-    status = http_select_handler(&request, &route_handler_func, &allow);
+    /* API 경로만 먼저 분기한다. 그 외 경로와 프록시 미설정 실행은
+     * 기존 라우터를 그대로 거쳐 정적·동적·CGI 서빙을 유지한다. */
+    if (proxy) proxy_route = proxy_select_route(&request, &allow);
+    if (proxy_route < 0) status = -proxy_route;
+    else if (proxy_route == PROXY_LOCAL)
+        status = http_select_handler(&request, &route_handler_func, &allow);
     if (status) goto respond;
 
     if (request.content_length) {
@@ -396,6 +409,17 @@ void handle_client(int connfd, const volatile sig_atomic_t *running,
     }
 
     request.body = (struct http_slice){body, body_received};
+    if (proxy_route > PROXY_LOCAL) {
+        /* 요청은 기존 상한(64KiB) 안에서 완전히 받은 뒤 백엔드로 보낸다.
+         * 따라서 클라이언트 100-continue는 위에서 처리하고 백엔드에는
+         * Expect를 넘기지 않는다. 응답 전체를 저장하는 동작은 하지 않는다. */
+        int forwarded = proxy_forward(connfd, &request, header, header_end,
+                                       (enum proxy_route)proxy_route, proxy, running);
+        if (forwarded == 0) finish_response(connfd, &output);
+        if (forwarded <= 0) goto cleanup;
+        status = forwarded;
+        goto respond;
+    }
     status = 200;
 
 respond:

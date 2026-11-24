@@ -7,6 +7,8 @@
 #include <time.h>
 #include "http.h"
 
+struct proxy_config;
+
 /* Provisional policy constants; each can be reconsidered independently. */
 enum {
     LISTEN_BACKLOG = 128,
@@ -28,5 +30,9 @@ int send_all(int fd, const void *buf, size_t len);
 /* Borrow the FD and cancellation flag. Main closes the FD exactly once. */
 void handle_client(int connfd, const volatile sig_atomic_t *running,
                    const struct timespec *accepted_at);
+/* 기존 함수는 로컬 서빙 전용으로 유지한다. 설정은 main에서 빌려 받는다. */
+void handle_client_with_proxy(int connfd, const volatile sig_atomic_t *running,
+                              const struct timespec *accepted_at,
+                              struct proxy_config *proxy);
 
 #endif

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
+#include "proxy.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -31,8 +32,18 @@ static int setup_signals(void) {
 
 /* Validate port and static root "public", then serve accepted connections sequentially. */
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+    if (argc != 2 && argc != 5) {
+        fprintf(stderr, "Usage: %s <port> [<submission-ip:port> <status-A-ip:port> <status-B-ip:port>]\n", argv[0]);
+        return 1;
+    }
+
+    /* 설정·조회 순번의 소유자는 main이다. 전역 연결 상태를 만들지 않고
+     * 호출 인자로 전달한다. 기존 ./build/server 8080 실행도 계속 지원한다. */
+    struct proxy_config proxy = {0};
+    if (argc == 5 && (proxy_parse_endpoint(argv[2], &proxy.submission) < 0 ||
+                      proxy_parse_endpoint(argv[3], &proxy.status[0]) < 0 ||
+                      proxy_parse_endpoint(argv[4], &proxy.status[1]) < 0)) {
+        fprintf(stderr, "Invalid backend endpoint; use numeric IPv4:port (1..65535)\n");
         return 1;
     }
     uint16_t port;
@@ -74,7 +85,8 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        if (g_running) handle_client(connfd, &g_running, &accepted_at);
+        if (g_running) handle_client_with_proxy(connfd, &g_running, &accepted_at,
+                                                argc == 5 ? &proxy : NULL);
         /* Linux: do not retry close after EINTR; the FD may be released. */
         if (close(connfd) < 0) perror("close client");
     }
