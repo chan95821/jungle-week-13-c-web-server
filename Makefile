@@ -11,10 +11,12 @@ TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser tes
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
 HANDLER_SRCS = src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c
-SRCS = src/main.c src/server.c src/http.c src/router.c src/proxy.c $(HANDLER_SRCS)
+PROXY_SRCS = src/proxy.c src/proxy/io.c src/proxy/headers.c src/proxy/body.c
+PROXY_HEADERS = src/proxy.h src/proxy/internal.h
+SRCS = src/main.c src/server.c src/http.c src/router.c $(PROXY_SRCS) $(HANDLER_SRCS)
 OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
-HEADERS = src/server.h src/http.h src/router.h src/proxy.h src/handlers/handlers.h
-TEST_SRCS = src/server.c src/http.c src/router.c src/proxy.c $(HANDLER_SRCS)
+HEADERS = src/server.h src/http.h src/router.h $(PROXY_HEADERS) src/handlers/handlers.h
+TEST_SRCS = src/server.c src/http.c src/router.c $(PROXY_SRCS) $(HANDLER_SRCS)
 
 .PHONY: all test verify verify-proxy clean server cgi $(TEST_NAMES)
 
@@ -43,10 +45,10 @@ test: $(TEST_BINS)
 	@for t in $(TEST_BINS); do ./$$t || exit 1; done
 
 $(BUILD_DIR)/test_body_send: tests/unit/test_body_send.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
-	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c src/router.c src/proxy.c $(HANDLER_SRCS)
+	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c src/router.c $(PROXY_SRCS) $(HANDLER_SRCS)
 
-$(BUILD_DIR)/test_proxy: tests/unit/test_proxy.c src/proxy.c src/proxy.h src/http.c src/http.h | $(BUILD_DIR)
-	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c
+$(BUILD_DIR)/test_proxy: tests/unit/test_proxy.c $(PROXY_SRCS) $(PROXY_HEADERS) src/http.c src/http.h | $(BUILD_DIR)
+	$(CC) $(ASAN_FLAGS) -o $@ $< $(PROXY_SRCS) src/http.c
 
 $(BUILD_DIR)/test_%: tests/unit/test_%.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< $(TEST_SRCS)

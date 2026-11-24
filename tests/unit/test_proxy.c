@@ -1,7 +1,11 @@
 #define _POSIX_C_SOURCE 200809L
-/* 내부 파서의 경계 검증. 테스트만 위해 production API를 늘리지 않는다. */
-#include "../../src/proxy.c"
+/* 공개 계약과 프록시 내부 파서 경계를 검사한다. 구현 .c를 직접 포함하지
+ * 않고 Makefile에서 실제 프록시 모듈을 연결한다. 기존 기대값은 유지한다. */
+#include "../../src/proxy.h"
+#include "../../src/proxy/internal.h"
 #include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
 static void test_endpoints_and_routes(void) {
     struct sockaddr_in address;
@@ -32,9 +36,9 @@ static void test_header_contracts(void) {
     struct http_request request;
     assert(http_parse_request(raw, sizeof(raw) - 1, &request) == 0);
     request.body = (struct http_slice){(const unsigned char *)"abc", 3};
-    unsigned char wire[PROXY_WIRE_BYTES + 1];
+    unsigned char wire[PROXY_WIRE_CAPACITY + 1];
     size_t length;
-    assert(build_request(raw, sizeof(raw) - 1, &request, wire, &length));
+    assert(proxy_build_request_headers(raw, sizeof(raw) - 1, &request, wire, &length));
     wire[length] = 0;
     assert(strstr((char *)wire, "POST /api/submissions?raw=%2f HTTP/1.1\r\n"));
     assert(strstr((char *)wire, "Host: original.example\r\n"));
@@ -47,10 +51,10 @@ static void test_header_contracts(void) {
         "HTTP/1.1 201 Created\r\nContent-Length: 3\r\n"
         "X-Hop: remove\r\nConnection: X-Hop\r\n"
         "Set-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n";
-    struct response_meta meta;
-    assert(parse_response(response, sizeof(response) - 1, &meta));
-    assert(meta.status == 201 && meta.has_length && meta.length == 3);
-    assert(build_response(response, sizeof(response) - 1, &meta, wire, &length));
+    struct proxy_response parsed_response;
+    assert(proxy_parse_response_headers(response, sizeof(response) - 1, &parsed_response));
+    assert(parsed_response.status_code == 201 && parsed_response.has_content_length && parsed_response.content_length == 3);
+    assert(proxy_build_response_headers(response, sizeof(response) - 1, &parsed_response, wire, &length));
     wire[length] = 0;
     assert(!strstr((char *)wire, "X-Hop:"));
     assert(strstr((char *)wire, "Set-Cookie: a=1\r\nSet-Cookie: b=2\r\n"));
@@ -67,18 +71,18 @@ static void test_header_contracts(void) {
         "HTTP/1.1 20x Bad\r\n\r\n"
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
-        assert(!parse_response((const unsigned char *)bad[i], strlen(bad[i]), &meta));
+        assert(!proxy_parse_response_headers((const unsigned char *)bad[i], strlen(bad[i]), &parsed_response));
 }
 
 static void test_chunk_sizes(void) {
     size_t size;
     const char *good[] = {"0", "aF", "3;foo=bar", "3;foo=\"a\\\"b\"", "3 ; foo = bar"};
     for (size_t i = 0; i < sizeof(good) / sizeof(good[0]); ++i)
-        assert(chunk_size((const unsigned char *)good[i], strlen(good[i]), &size));
+        assert(proxy_parse_chunk_size((const unsigned char *)good[i], strlen(good[i]), &size));
     const char *bad[] = {"", "-1", "+1", "xyz", "1;", "1;foo=", "1;foo=\"unterminated",
                          "ffffffffffffffffffffffffffffffff", "1;foo=\"a\001b\""};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
-        assert(!chunk_size((const unsigned char *)bad[i], strlen(bad[i]), &size));
+        assert(!proxy_parse_chunk_size((const unsigned char *)bad[i], strlen(bad[i]), &size));
 }
 
 int main(void) {
