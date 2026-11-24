@@ -85,8 +85,9 @@ int proxy_parse_endpoint(const char *text, struct sockaddr_in *address) {
         .sin_port = htons((uint16_t)port)
     };
     return port != 0 && inet_pton(AF_INET, ip, &address->sin_addr) == 1 ? 0 : -1;
-}
+}  //inet_pton : IP문자열을 바이너리 주소로 바꿈
 
+// 목적지 종류만 결정.
 int proxy_select_route(const struct http_request *request, const char **allow) {
     const char *expected_method;
     enum proxy_route route;
@@ -103,10 +104,10 @@ int proxy_select_route(const struct http_request *request, const char **allow) {
     if (http_slice_equal(request->method, expected_method)) return route;
     bool supported_method = http_slice_equal(request->method, "GET") ||
                             http_slice_equal(request->method, "POST");
-    if (!supported_method) return -501;
+    if (!supported_method) return 501;
 
     *allow = expected_method;
-    return -405;
+    return 405;
 }
 
 /* 조회 순번은 원래와 같이 연결 시도 전에 이동한다. 실패해도 다른 목적지로
