@@ -192,7 +192,8 @@ static bool parse_status_line(const unsigned char *header, size_t length,
 static bool parse_response_field(const struct header_field *field,
                                   struct proxy_response *response) {
     if (header_name_is(field->name, "content-length")) {
-        if (response->has_content_length || !parse_content_length(field->value, &response->content_length)) return false;
+        if (response->has_content_length ||
+            !parse_content_length(field->value, &response->content_length)) return false;
         response->has_content_length = true;
     } else if (header_name_is(field->name, "transfer-encoding")) {
         if (response->is_chunked || !header_name_is(field->value, "chunked")) return false;

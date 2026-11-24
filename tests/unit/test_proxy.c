@@ -53,7 +53,8 @@ static void test_header_contracts(void) {
         "Set-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n";
     struct proxy_response parsed_response;
     assert(proxy_parse_response_headers(response, sizeof(response) - 1, &parsed_response));
-    assert(parsed_response.status_code == 201 && parsed_response.has_content_length && parsed_response.content_length == 3);
+    assert(parsed_response.status_code == 201 && parsed_response.has_content_length &&
+           parsed_response.content_length == 3);
     assert(proxy_build_response_headers(response, sizeof(response) - 1, &parsed_response, wire, &length));
     wire[length] = 0;
     assert(!strstr((char *)wire, "X-Hop:"));
