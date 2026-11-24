@@ -7,7 +7,7 @@ OBJ_DIR = $(BUILD_DIR)/obj
 TARGET = $(BUILD_DIR)/server
 CGI_DIR = cgi-bin
 CGI_BINS = $(CGI_DIR)/order
-TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_body_send
+TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_body_send test_proxy
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
 HANDLER_SRCS = src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c
@@ -16,7 +16,7 @@ OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 HEADERS = src/server.h src/http.h src/router.h src/proxy.h src/handlers/handlers.h
 TEST_SRCS = src/server.c src/http.c src/router.c src/proxy.c $(HANDLER_SRCS)
 
-.PHONY: all test verify clean server cgi $(TEST_NAMES)
+.PHONY: all test verify verify-proxy clean server cgi $(TEST_NAMES)
 
 all: $(TARGET) $(CGI_BINS)
 
@@ -45,6 +45,9 @@ test: $(TEST_BINS)
 $(BUILD_DIR)/test_body_send: tests/unit/test_body_send.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c src/router.c src/proxy.c $(HANDLER_SRCS)
 
+$(BUILD_DIR)/test_proxy: tests/unit/test_proxy.c src/proxy.c src/proxy.h src/http.c src/http.h | $(BUILD_DIR)
+	$(CC) $(ASAN_FLAGS) -o $@ $< src/http.c
+
 $(BUILD_DIR)/test_%: tests/unit/test_%.c $(TEST_SRCS) $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< $(TEST_SRCS)
 
@@ -53,6 +56,10 @@ verify: $(TARGET) $(CGI_BINS)
 	python3 scripts/verify_iter2.py
 	python3 scripts/verify_iter3.py --root public --cafe pages/cafe.html --menu pages/menu.html
 	python3 scripts/verify_iter3_dynamic.py
+
+# 기존 회귀와 별도인 기능 검증 대상. 실행 범위 확정 후에만 호출한다.
+verify-proxy: $(TARGET)
+	python3 scripts/verify_iter4.py
 
 clean:
 	rm -f $(OBJS) $(TARGET) $(CGI_BINS) $(TEST_BINS)

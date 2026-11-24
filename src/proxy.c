@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 enum { BACKEND_TIMEOUT_MS = 1000, CLIENT_TIMEOUT_MS = 5000,
-       PROXY_BUFFER_BYTES = 8192 };
+       PROXY_BUFFER_BYTES = 8192, PROXY_WIRE_BYTES = PROXY_BUFFER_BYTES + 256 };
 
 /* CS:APP의 robust I/O와 같은 목적의 직접 구현이다. TCP는 바이트 순서와
  * 재전송을 맡지만 HTTP 경계, 부분 recv/send 누적, timeout은 서버 책임이다.
@@ -225,7 +225,7 @@ static bool hop_by_hop(struct http_slice name) {
 }
 
 static bool append(unsigned char *out, size_t *used, const void *data, size_t count) {
-    if (count > PROXY_BUFFER_BYTES - *used) return false;
+    if (count > PROXY_WIRE_BYTES - *used) return false;
     memcpy(out + *used, data, count);
     *used += count;
     return true;
@@ -505,7 +505,8 @@ int proxy_forward(int client, const struct http_request *request,
                   const unsigned char *header, size_t header_length,
                   enum proxy_route route, struct proxy_config *config,
                   const volatile sig_atomic_t *running) {
-    unsigned char wire[PROXY_BUFFER_BYTES];
+    /* 원본 8KiB 헤더에 Connection/Via 등을 다시 붙일 여유. 본문 버퍼와 별개. */
+    unsigned char wire[PROXY_WIRE_BYTES];
     size_t wire_length;
     if (!build_request(header, header_length, request, wire, &wire_length)) return 400;
 

@@ -22,6 +22,16 @@
 - sanitizer, FD 회수, timeout 검증 범위를 실행 전에 사용자와 확정한다.
 - 부모 Issue #4 원문 수령 뒤 필수 중계 테스트 누락 여부 대조.
 
+## 구현 함수별로 먼저 정한 경계
+
+- endpoint: 포트 0/65536/비숫자, IPv4 문법, DNS·IPv6 미지원 입력 거절.
+- 경로 선택: 원본 path 정확 일치, query는 별도 보존, 잘못된 GET/POST는 405, 그 외 메서드는 기존 정책 501.
+- 헤더 중계: Connection 지명 헤더가 Connection보다 먼저 있어도 제거. Set-Cookie 중복 순서 보존. Host 보존. 프레이밍을 하나로 재생성.
+- 응답 파서: HTTP/1.0·1.1, 100→최종 상태, 204·304 본문 없음, 잘못된 상태/필드/중복 CL/TE+CL/미지원 TE는 502.
+- 청크: 16진수 오버플로우, chunk extension, data 뒤 CRLF, trailer 상한·문법, 종료 청크 없이 EOF. 정상 종료 전에는 client 종료 청크를 생성하지 않음.
+- EOF 응답: 정상 EOF는 재청크 완료, reset·timeout은 종료 청크 생략. 길이 없는 깨끗한 조기 EOF 자체는 탐지할 수 없는 한계 기록.
+- FD: backend 소켓 소유자 하나, client flags 복원, main에서 client close. timeout/불완전 응답/클라이언트 reset 반복 후 정상 요청과 FD 수 회복.
+
 ## 결과
 
 - 공식 기능·회귀 검증: 미실행.
