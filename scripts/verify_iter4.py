@@ -200,11 +200,47 @@ def settled_fds(proc, expected):
     raise AssertionError(f"FD baseline={expected}, now={fd_count(proc)}")
 
 
+def idle_baseline(proc):
+    counts = []
+    for _ in range(10):
+        count = fd_count(proc)
+        if count is None:
+            return None
+        counts.append(count)
+        time.sleep(0.02)
+    return min(counts)
+
+
+def expect_continue(port):
+    body = b"\x00continue\xff"
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.settimeout(5)
+        sock.sendall(b"POST /api/submissions HTTP/1.1\r\nHost: original.example\r\n"
+                     + f"Content-Length: {len(body)}\r\n".encode()
+                     + b"Expect: 100-continue\r\n\r\n")
+        interim = bytearray()
+        while not interim.endswith(b"\r\n\r\n"):
+            part = sock.recv(1)
+            assert part, "EOF waiting for 100 Continue"
+            interim.extend(part)
+        assert interim == b"HTTP/1.1 100 Continue\r\n\r\n"
+        sock.sendall(body)
+        sock.shutdown(socket.SHUT_WR)
+        wire = bytearray()
+        while True:
+            part = sock.recv(8192)
+            if not part:
+                break
+            wire.extend(part)
+        response = parse(bytes(wire))
+        assert response.status == 201 and response.read() == body
+
+
 def main():
     with backend("submission", "submission") as submission, backend("A", "status") as a, backend("B", "status") as b:
         endpoints = [endpoint(submission), endpoint(a), endpoint(b)]
         with proxy(endpoints) as (proc, port):
-            baseline = fd_count(proc)
+            baseline = idle_baseline(proc)
             for body in (b"", BINARY):
                 target = b"/api/submissions?raw=%2F"
                 response = parse(raw_request(port, target, b"POST", body,
@@ -231,6 +267,13 @@ def main():
                 assert len(a.events) + len(b.events) == before + 1
             assert identities == {"A", "B"}
             assert len(submission.events) == 2
+
+            expect_continue(port)
+            assert b"expect" not in submission.events[-1][2]
+
+            # 읽지 않고 즉시 닫는 클라이언트. 이후 정상 응답과 FD 회수를 확인한다.
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as abandoned:
+                abandoned.sendall(b"GET /api/submission-status HTTP/1.1\r\nHost: local\r\n\r\n")
 
             for case in ("chunked", "eof", "interim", "no-content", "not-modified"):
                 response = parse(raw_request(port, f"/api/submission-status?case={case}".encode()))
@@ -294,6 +337,23 @@ def main():
                     response.read()
                 assert parse(raw_request(port, b"/hello")).read() == b"Hello"
         print("[PASS] connection refusal -> 502, SIGINT shutdown")
+
+        # 실제 중계 대기 도중 SIGTERM: 신호가 poll을 깨우고 backend FD를 정리해야 한다.
+        with proxy(endpoints) as (proc, port):
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+                client.sendall(b"GET /api/submission-status?case=silent HTTP/1.1\r\nHost: local\r\n\r\n")
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    with a.lock, b.lock:
+                        waiting = any(event[1].endswith(b"case=silent") for event in a.events[-1:] + b.events[-1:])
+                    if waiting:
+                        break
+                    time.sleep(0.01)
+                else:
+                    raise AssertionError("backend did not receive shutdown test request")
+                proc.send_signal(signal.SIGTERM)
+                assert proc.wait(timeout=3) == 0
+        print("[PASS] SIGTERM during backend wait")
 
 
 if __name__ == "__main__":
