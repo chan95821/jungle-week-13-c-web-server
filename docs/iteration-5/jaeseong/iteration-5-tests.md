@@ -29,3 +29,5 @@
 5. `python3 scripts/verify_iter5.py --server build/server-tsan`, 동일 기능 범위의 자료 경쟁 검사. sanitizer 실행 환경 오류는 통과로 처리하지 않는다.
 
 예상 통과 기준: 각 스크립트 assertion 통과, 응답 바이트 일치, 502/504 유지, 중단 응답의 불완전성 검출, FD 비누적, 정상 종료, sanitizer 진단 없음. 실패 시 이 범위 내 수정 후 재검증한다. 단순 성공 로그만으로 stderr의 sanitizer 진단을 놓치지 않도록 검사한다.
+
+2026-11-25 사용자가 “검증해야지”로 위 범위 실행을 허락했다. 실제 결과와 skip/한계는 [검증 결과](iteration-5-results.md)에 기록한다. 이 허락에 성능 측정은 포함하지 않는다.

@@ -64,7 +64,7 @@ verify: $(TARGET) $(CGI_BINS) $(BACKEND_TARGET)
 	python3 scripts/verify_edge_cases.py
 
 clean:
-	rm -f $(OBJS) $(LIFECYCLE_TEST_OBJS) $(TARGET) $(CGI_BINS) $(TEST_BINS) $(BACKEND_TARGET)
+	rm -f $(OBJS) $(LIFECYCLE_TEST_OBJS) $(TARGET) $(CGI_BINS) $(TEST_BINS) $(BACKEND_TARGET) $(BUILD_DIR)/server-asan $(BUILD_DIR)/server-tsan
 
 backend: $(BACKEND_TARGET)
 

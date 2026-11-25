@@ -94,7 +94,7 @@ curl --noproxy '*' -i http://127.0.0.1:8080/hello
 
 | 구간 | 임시값 |
 | --- | --- |
-| 기존 클라이언트 I/O 호출 | 5초 |
+| 클라이언트 입력/출력 무진행 | 5초 |
 | 기존 전체 요청 헤더 / 본문 | 7초 / 15초 |
 | 백엔드 연결 전체 | 1초 |
 | 백엔드 요청 전달 전체 | 5초 |
@@ -102,30 +102,31 @@ curl --noproxy '*' -i http://127.0.0.1:8080/hello
 | 백엔드 본문 무진행 / 전체 수신 | 5초 / 15초 |
 | 기존 응답 후 수신 폐기 | 최대 1초 / 64KiB |
 
-수치는 표준 권고값·최적값이 아니다. 응답 본문 수신 기한은 최종 헤더 검증 뒤 시작하고 수신 진행으로 늘리지 않는다. 클라이언트에 마지막 바이트가 도달할 때까지의 전체 완료 기한을 보장하는 것은 아니다. 기존 클라이언트 송신 호출 제한은 유지한다.
+수치는 표준 권고값·최적값이 아니다. B의 본문 전체 기한은 최종 헤더 검증 뒤 시작하고, 클라이언트 송신 대기도 포함한다. 백엔드 무진행 기한은 읽기를 기다리는 동안 적용하며 클라이언트 역압 후 다시 시작한다. 각 기한은 작업자의 최소 힙에 등록하고 epoll 대기 시간에 반영한다.
 
-main이 설정·조회 순번·리스너·클라이언트 FD를 소유한다. handle_client가 요청 헤더·요청 본문을 소유한다. 프록시 응답 상태는 백엔드 FD·16KiB 수신 버퍼와 필요한 길이만 할당한 송신 헤더·Connection 필드·트레일러를 소유한다. 원본 헤더와 재구성 작업 공간은 헤더 준비 함수의 지역 공간이다. 송신 헤더는 첫 본문 next에서 회수하고, 그 외 정상·실패 경로는 provider cleanup이 회수한다. 준비 실패 시 준비 함수가 회수한다.
+main은 설정·리스너와 전체 실행 수명을 소유한다. 수락 큐에 전달한 뒤 client/backend FD·요청 버퍼·송신 위치의 소유자는 해당 네트워크 worker다. 응답 헤더 작업 공간은 nonblocking 수신을 이어갈 수 있도록 연결에 보관하고, 헤더 송신 완료 뒤 회수한다. 파일/CGI 보조 작업 동안에는 연결을 해제하지 않는다. 종료 시 FD 등록 제거·close를 먼저 하고 같은 이벤트 배치의 포인터 사용이 끝난 뒤 메모리를 해제한다.
 
 16KiB는 스트림 버퍼 용량이다. 헤더·트레일러·요청 본문과 구조체 공간이 추가되므로 연결 전체 메모리와 같지 않다. 응답 헤더/청크 메타데이터는 기존 8KiB 상한을 재사용하며, 출력 헤더 공간은 필드 재구성과 Via 등을 위해 그 상한에서 유도한다.
 
 ## 컴파일과 공식 검증
 
-2026-11-25 P2-9 A안 라우팅 일원화 후 clean·컴파일/링크 성공, 단위 8개(ASan/UBSan)와 E2E 스크립트 6개를 통과했다. 엣지 40개 통과·실패 0·skip 0이며 전체 최종 실패·skip도 없었다. 기존 정책과 오류 우선순위를 유지했다. 최신 상세 기록은 docs/iteration-4/Snoopykid/iteration-4-routing-verification-results.md다. 이전 보완 보고서는 당시 기록으로 보존한다. 기능 검증 이후 사용자 승인 조건의 보완 전후 성능48회를 별도로 완료했다. 외부 교차 스위트 전체는 재실행하지 않았다.
+B의 이번 실행 결과는 [Iteration 5 검증 기록](docs/iteration-5/jaeseong/iteration-5-results.md)을 참조한다. 과거 Iteration 4의 검증/성능 기록은 해당 구현 당시 결과이며 현재 B의 결과로 간주하지 않는다.
 
 ~~~sh
 # 아래 두 명령은 사용자와 검증 범위를 확정한 후 실행한다.
 make test
 make verify
+make verify-b
 ~~~
 
-make test: test_parse_port, test_recv_header, test_send_all, test_http_parser, test_body_send, test_proxy_selection, test_proxy_protocol, test_proxy_lifecycle (ASan/UBSan). 수명 테스트는 별도 build/test-obj 객체에서만 할당 함수를 대체하며 서버에는 주입 코드를 넣지 않는다.
+make test: 기존 8개 + test_event_io (ASan/UBSan). test_event_io는 실제 EAGAIN/부분 송신과 타이머 힙을 검사한다. 수명 테스트는 별도 build/test-obj 객체에서만 할당 함수를 대체하며 서버에는 주입 코드를 넣지 않는다.
 
 make verify: Iteration 1·2·3 정적·3 동적 회귀와 Iteration 4 C 백엔드 중계 및 엣지 40개 검증. make verify-edge로 엣지 스크립트만 실행할 수도 있다. 테스트는 임시 설정·정적 fixture·임시 포트를 사용한다. 사용자 설정 파일과 실제 운영 권한은 바꾸지 않는다.
 
 빌드 산출물은 build/이며 C CGI 바이너리는 기존 cgi-bin/을 사용한다. 둘 다 Git에서 제외한다. make clean은 명시한 바이너리·객체만 지우며 build/proxy.conf.example과 build/legacy/는 유지한다.
 
 
-## 승인 성능 재측정 결과
+## 과거 Iteration 4 승인 성능 재측정 기록 (현재 B 측정 아님)
 
 2026-11-25 동일 WSL에서 f32e17d와 현재 스냅샷을 공통 C 백엔드/1KiB 응답/-O2로 비교했다. 직접 기준선과 S1~S6/S_MAX, 조건별3회로 총48회를 완료했다. 성공165,929건, 실패·5xx0건, S1 양쪽 통과, 예정 요청 건수 미달·FD증가0이다.
 
@@ -133,10 +134,9 @@ make verify: Iteration 1·2·3 정적·3 동적 회귀와 Iteration 4 C 백엔�
 
 ## 코드 흐름과 후속 범위
 
-- src/main.c → src/server.c의 handle_client → src/router.c의 단일 경로/메서드 판별 → src/proxy.c의 보호 헤더 검사·설정·백엔드 분배 → src/proxy_transfer.c의 조율 → proxy_io.c의 연결/수신과 proxy_headers.c의 요청/응답 헤더 준비 → proxy_body.c의 본문 제공 → 기존 송신·정리.
-- 상세 리뷰: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md.
-- 선택·검증 후보: docs/iteration-4/Snoopykid/iteration-4-requirements.md, iteration-4-tests.md.
-- 순차 처리이므로 조회 A/B 분배가 동시 처리 효과를 보장하지 않는다.
-- Iteration 5는 여러 작업자 + 작업자별 non-blocking 이벤트 루프 방향이다. 프로세스/스레드·수락/분배·상태 공유·역압력 정책은 사용자 선택 전이다. 현재 blocking provider를 그대로 이벤트 루프에서 호출하지 않는다.
+- 현재: main → run_event_server → 수락 큐/eventfd → run_worker_event_loop → advance_connection → 기존 파서/라우터 → event_proxy의 nonblocking 백엔드 처리 → 응답/정리.
+- 상세 리뷰: [Iteration 5 호출 흐름](docs/iteration-5/jaeseong/iteration-5-walkthrough.md).
+- 기존 server.c의 handle_client/proxy_prepare_response는 순차 기준/단위 테스트 경로이며 현재 main에서 호출하지 않는다. 과거 설명은 docs/iteration-4/Snoopykid/iteration-4-walkthrough.md다.
+- 기본 스레드는 메인 1 + 네트워크 4 + 파일/CGI 보조 2 = 7개다. 리스너는 메인만 수락하고 연결은 한 작업자가 종료까지 담당한다.
 - 동시 연결 1만 개는 검토 목표다. 성능 측정은 환경·조건·지표를 제시하고 별도 허락 후 진행한다.
 - 기존 정적 파일의 realpath/open 사이 경합 등 운영상 한계는 이번 프록시 추가로 해결했다고 주장하지 않는다.
