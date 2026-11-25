@@ -272,8 +272,42 @@ static void check_body(const unsigned char *wire, size_t wire_length,
     close(pair[1]);
 }
 
+static void test_selection_timing_at_body_boundary(void) {
+    const enum backend_framing framings[]={BACKEND_LENGTH,BACKEND_CHUNKED,BACKEND_CLOSE};
+    const char *wire[]={"abc","3\r\nabc\r\n0\r\n\r\n","abc"};
+    for(size_t i=0;i<3;++i){
+        int pair[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,pair)==0);
+        assert(write(pair[1],wire[i],strlen(wire[i]))==(ssize_t)strlen(wire[i]));
+        assert(shutdown(pair[1],SHUT_WR)==0);
+        struct distribution_timing timing={0};
+        struct proxy_stream stream={.backend_fd=pair[0],.framing=framings[i],.remaining=3,
+            .selection_timing=&timing,.selection_clock_valid=true,.body_started=true};
+        assert(clock_gettime(CLOCK_MONOTONIC,&stream.selection_started)==0);
+        assert(make_deadline(&stream.body_deadline,5)==0);
+        struct http_slice body;assert(read_backend_body_chunk(&stream,&body)==BODY_DATA && body.length==3);
+        if(i==0)assert(stream.selection_finished && timing.representative_us>0);
+        else assert(!stream.selection_finished && !timing.representative_us);
+        assert(read_backend_body_chunk(&stream,&body)==BODY_END);
+        assert(stream.selection_finished && timing.representative_us>0);
+        struct distribution_timing first=timing;
+        finish_proxy_timing(&stream,DISTRIBUTION_FAILED);
+        assert(timing.representative_us==first.representative_us && timing.last_finished_us==first.last_finished_us);
+        free(stream.trailer_buffer);close(pair[0]);close(pair[1]);
+    }
+    int pair[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,pair)==0);close(pair[1]);
+    struct distribution_timing timing={0};
+    struct proxy_stream stream={.backend_fd=pair[0],.framing=BACKEND_LENGTH,.remaining=5,
+        .selection_timing=&timing,.selection_clock_valid=true,.body_started=true};
+    assert(clock_gettime(CLOCK_MONOTONIC,&stream.selection_started)==0 && make_deadline(&stream.body_deadline,5)==0);
+    struct http_slice body;assert(read_backend_body_chunk(&stream,&body)==BODY_ERROR);
+    assert(timing.representative_us>=DISTRIBUTION_FAILURE_FLOOR_US);close(pair[0]);
+    timing=(struct distribution_timing){0};stream.selection_finished=false;
+    finish_proxy_timing(&stream,DISTRIBUTION_CANCELLED);assert(!timing.representative_us);
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
+    test_selection_timing_at_body_boundary();
     test_response_headers();
     test_http10_response_headers();
     test_forwarded_request_lengths();

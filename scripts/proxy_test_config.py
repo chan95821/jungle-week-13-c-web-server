@@ -13,6 +13,7 @@ def regression_config():
         atexit.register(_fixture.cleanup)
         path = Path(_fixture.name) / "proxy.conf"
         path.write_text(
+            "worker-policy rr\nquery-policy rr\n"
             "submission 127.0.0.1:8001\n"
             "query-a 127.0.0.1:8002\n"
             "query-b 127.0.0.1:8003\n",

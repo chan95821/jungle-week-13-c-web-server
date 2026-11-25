@@ -109,7 +109,10 @@ respond:
         if (status == 200 && selected_route.proxy_route != PROXY_ROUTE_LOCAL) {
             const struct sockaddr_in *backend =
                 proxy_select_backend(proxy_config, selection, selected_route.proxy_route);
-            proxy_prepare_response(backend, &request, running, &response);
+            struct distribution_timing *timing=NULL;
+            if(selected_route.proxy_route==PROXY_ROUTE_QUERY && backend)
+                timing=&selection->timing[backend==&proxy_config->query_backends[0]?0:1];
+            proxy_prepare_tracked_response(backend, &request, running, &response,timing);
         } else if (status == 200 && selected_route.local_handler)
             selected_route.local_handler(&request, &response);
         else router_prepare_error(&response, status, allow);

@@ -1,7 +1,7 @@
 #ifndef PROXY_INTERNAL_H
 #define PROXY_INTERNAL_H
 
-/* Private protocol/state helpers shared by the sequential baseline and B driver. */
+/* Private to the sequential proxy implementation and its unit tests. */
 #include "proxy.h"
 #include "socket_io.h"
 
@@ -11,6 +11,9 @@ enum { PROXY_OUTPUT_HEADER_BYTES = 2 * REQ_HEADER_MAX_BYTES + 256 };
 /* Owns backend_fd and optional heap blocks; never borrows header workspace slices. */
 struct proxy_stream {
     int backend_fd;
+    struct distribution_timing *selection_timing;
+    struct timespec selection_started;
+    bool selection_clock_valid, selection_finished;
     const volatile sig_atomic_t *running;
     struct timespec header_deadline, body_deadline;
     bool body_started;
@@ -30,8 +33,7 @@ struct proxy_stream {
     int status;
 };
 
-/* Caller-owned header workspace: stack in baseline, connection-owned heap in B.
- * fields/status_line borrow raw_header and must not outlive this workspace. */
+/* Preparation-only stack workspace. fields/status_line borrow raw_header. */
 struct proxy_response_headers {
     unsigned char raw_header[REQ_HEADER_MAX_BYTES];
     size_t raw_header_length;
@@ -40,21 +42,18 @@ struct proxy_response_headers {
     struct http_slice fields, status_line;
 };
 
+int build_backend_request_headers(unsigned char *,size_t,size_t *,const struct sockaddr_in *,const struct http_request *);
+int retain_trailer_connection_fields(struct proxy_stream *,struct http_slice);
 int connect_backend(struct proxy_stream *, const struct sockaddr_in *);
 int forward_request_to_backend(struct proxy_stream *, const struct sockaddr_in *,
                                const struct http_request *);
-/* 순수 헤더 생성/검증을 blocking I/O에서 분리하여 이벤트 경로에서도 재사용한다. */
-int build_backend_request_header(const struct sockaddr_in *, const struct http_request *,
-                                  unsigned char *, size_t, size_t *);
-/* 완전한 CRLFCRLF 블록 하나: 0=interim, 1=final, -1=잘못된 응답. */
-int consume_backend_header_block(struct proxy_stream *, struct proxy_response_headers *);
-bool backend_trailer_is_allowed(const struct proxy_stream *, struct http_field);
 /* Copies only the completed wire header and final chunked Connection fields. */
 int prepare_backend_response_headers(struct proxy_stream *);
 int parse_backend_headers(struct proxy_stream *, struct proxy_response_headers *);
 int build_client_response_headers(struct proxy_stream *, struct proxy_response_headers *);
 enum body_result read_backend_body_chunk(void *, struct http_slice *);
 void cleanup_backend_response(void *);
+void finish_proxy_timing(struct proxy_stream *,enum distribution_sample_result);
 int make_deadline(struct timespec *, int);
 bool deadline_reached(const struct timespec *);
 int fill_backend_buffer(struct proxy_stream *);

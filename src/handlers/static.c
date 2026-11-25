@@ -76,7 +76,6 @@ static void prepare_file(const char *candidate, const char *allowed_directory,
 
     /* O_NONBLOCK prevents opening a FIFO from blocking before fstat rejects it.
      * The path may still change between realpath and open (TOCTOU). */
-    /* 다른 worker가 CGI를 시작하는 순간에도 이 FD가 exec에 새지 않도록 원자적으로 설정. */
     fd = open(resolved, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) { status = router_path_error_status(errno); goto fail; }
     if (fstat(fd, &info) < 0) goto fail;

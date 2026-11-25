@@ -87,6 +87,15 @@ static void handle_backend_request(int client, const char *identity, const char 
     }
     request.body = (struct http_slice){body, request.content_length};
     io.deadline = NULL;
+    if (!strcmp(mode, "large-body")) {
+        static const char header[] = "HTTP/1.1 200 OK\r\nContent-Length: 4194304\r\n\r\n";
+        unsigned char bytes[16384];
+        for (size_t i=0; i<sizeof(bytes); ++i) bytes[i]=(unsigned char)(i%251);
+        if (send_all_with_deadline(client,header,sizeof(header)-1,&io)<0) goto cleanup;
+        for (size_t sent=0; sent<4194304; sent+=sizeof(bytes))
+            if (send_all_with_deadline(client,bytes,sizeof(bytes),&io)<0) break;
+        goto cleanup;
+    }
     if (!strcmp(mode, "notify-silent")) {
         fputs("request-received\n", stderr);
         fflush(stderr);
@@ -164,32 +173,16 @@ static void handle_backend_request(int client, const char *identity, const char 
         (void)send_all_with_deadline(client, invalid, sizeof(invalid) - 1, &io);
         goto cleanup;
     }
-    if (!strcmp(mode, "chunked") || !strcmp(mode, "fragmented-chunk") || !strcmp(mode, "bad-chunk")) {
+    if (!strcmp(mode, "chunked") || !strcmp(mode, "bad-chunk")) {
         static const char valid[] =
             "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n"
             "Content-Type: application/octet-stream\r\nTrailer: X-End\r\n\r\n"
             "3;kind=\"test\"\r\na\0b\r\n2\r\ncd\r\n0\r\nX-End: complete\r\n\r\n";
         static const char invalid[] =
             "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\nZ\r\n";
-        bool correct = strcmp(mode, "bad-chunk") != 0;
-        const char *wire = correct ? valid : invalid;
-        size_t length = correct ? sizeof(valid) - 1 : sizeof(invalid) - 1;
-        if (!strcmp(mode, "fragmented-chunk")) {
-            for (size_t i = 0; i < length; ++i) {
-                if (send_all_with_deadline(client, wire + i, 1, &io) < 0) break;
-                pause_backend_milliseconds(2);
-            }
-        } else (void)send_all_with_deadline(client, wire, length, &io);
-        goto cleanup;
-    }
-    if (!strcmp(mode, "large")) {
-        static const char response_header[] =
-            "HTTP/1.1 200 OK\r\nContent-Length: 8388608\r\nContent-Type: application/octet-stream\r\n\r\n";
-        unsigned char block[16384];
-        for (size_t i = 0; i < sizeof(block); ++i) block[i] = (unsigned char)i;
-        if (send_all_with_deadline(client, response_header, sizeof(response_header) - 1, &io) < 0) goto cleanup;
-        for (size_t i = 0; i < 8388608 / sizeof(block); ++i)
-            if (send_all_with_deadline(client, block, sizeof(block), &io) < 0) break;
+        const char *wire = !strcmp(mode, "chunked") ? valid : invalid;
+        size_t length = !strcmp(mode, "chunked") ? sizeof(valid) - 1 : sizeof(invalid) - 1;
+        (void)send_all_with_deadline(client, wire, length, &io);
         goto cleanup;
     }
     if (!strcmp(mode, "close")) {

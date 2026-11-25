@@ -13,8 +13,7 @@ struct http_slice {
     size_t length;
 };
 
-/* Slices borrow caller-owned request storage (B: event_connection).
- * This struct frees nothing; the owner keeps storage alive through response/cleanup. */
+/* All slices borrow storage owned by handle_client; this struct frees nothing. */
 struct http_request {
     struct http_slice method;
     struct http_slice target;
