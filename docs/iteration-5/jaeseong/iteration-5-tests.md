@@ -19,3 +19,13 @@
 바이트·상태·헤더 계약 유지, 상한과 오류 매핑 유지, 타임아웃 허용 오차 내 종료, 다른 요청 계속 처리, 장애 뒤 FD 비누적, sanitizer 오류 없음. 시간 제한의 기능 판정은 성능 비교가 아니다.
 
 성능/부하·처리량/p95 수집, 10,000연결, 자원 포화 비교는 제외한다. 실행 명령과 최종 범위는 구현 후 사용자에게 제시해 확정한다. 현재 이 문서 작성은 실행 허락이 아니다.
+
+## 준비한 실행 범위
+
+1. `make test`: 기존 8개 + 실제 EAGAIN/부분 송신과 타이머 힙을 확인하는 `test_event_io` (ASan/UBSan).
+2. `make verify`: 기존 6개 E2E 스크립트.
+3. `make verify-b`: `scripts/verify_iter5.py`, 작업자 1/4에서 미완성 업로드·기다리는 백엔드·느린 수신·분할 chunk/trailer·전체 RR·장애 FD 정리·CGI 대기/종료.
+4. `python3 scripts/verify_iter5.py --server build/server-asan`, 동일 기능 범위의 메모리 검사.
+5. `python3 scripts/verify_iter5.py --server build/server-tsan`, 동일 기능 범위의 자료 경쟁 검사. sanitizer 실행 환경 오류는 통과로 처리하지 않는다.
+
+예상 통과 기준: 각 스크립트 assertion 통과, 응답 바이트 일치, 502/504 유지, 중단 응답의 불완전성 검출, FD 비누적, 정상 종료, sanitizer 진단 없음. 실패 시 이 범위 내 수정 후 재검증한다. 단순 성공 로그만으로 stderr의 sanitizer 진단을 놓치지 않도록 검사한다.

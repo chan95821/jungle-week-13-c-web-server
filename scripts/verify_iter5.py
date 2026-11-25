@@ -9,12 +9,40 @@ from pathlib import Path
 import shutil
 import signal
 import socket
+import subprocess
 import tempfile
 import time
 
 import verify_iter4 as regression
 from verify_iter1 import receive_to_eof
 from verify_iter4 import Fixture, ROOT, header_values, parse_response, request_wire, stop_child
+
+
+def stop_and_check_diagnostics(process):
+    stop_child(process)
+    diagnostics = process.b_diagnostics
+    diagnostics.seek(0)
+    output = diagnostics.read()
+    # 프로세스가 종료해도 sanitizer가 stderr에만 보고한 오류를 놓치지 않는다.
+    assert not any(marker in output for marker in (
+        b"AddressSanitizer", b"LeakSanitizer", b"ThreadSanitizer", b"runtime error:")), output.decode(errors="replace")
+
+
+class CheckedFixture(Fixture):
+    def start(self, argv, port):
+        # 파일에 받으면 큰 sanitizer 진단 때문에 stderr PIPE가 가득 차는 일도 없다.
+        diagnostics = self.stack.enter_context(tempfile.TemporaryFile())
+        process = subprocess.Popen(argv, cwd=self.directory, stdout=subprocess.DEVNULL, stderr=diagnostics)
+        process.b_diagnostics = diagnostics
+        self.stack.callback(stop_and_check_diagnostics, process)
+        try:
+            regression.wait_for_port(port)
+        except Exception:
+            diagnostics.seek(0)
+            output = diagnostics.read().decode(errors="replace")
+            raise AssertionError(f"child startup failed: {argv}\n{output}") from None
+        assert process.poll() is None
+        return process
 
 
 @contextmanager
@@ -24,7 +52,7 @@ def running_fixture(workers):
         (directory / "public").symlink_to(ROOT / "public", target_is_directory=True)
         (directory / "cgi-bin").mkdir()
         shutil.copy2(ROOT / "cgi-bin/order", directory / "cgi-bin/order")
-        fixture = Fixture(stack, directory)
+        fixture = CheckedFixture(stack, directory)
         stop_child(fixture.proxy)
         fixture.proxy = fixture.start(
             [str(regression.SERVER), str(fixture.proxy_port), str(fixture.config), str(workers)],
@@ -77,14 +105,17 @@ def check_global_query_sequence(fixture):
 def check_waiting_backend_isolation(fixture):
     fixture.query_mode("slow-body")
     try:
-        with ThreadPoolExecutor(max_workers=1) as reader:
-            slow = reader.submit(request_wire, fixture.proxy_port)
-            # 느린 본문 전송이 시작된 것을 socket으로 직접 관찰해 race를 없앤다.
-            # 위 요청은 완료 전까지 2초 이상 걸리는 C fixture다.
-            time.sleep(0.15)
-            check_submission(fixture, b"while-backend-waits")
-            assert not slow.done(), "submission was held until the slow query completed"
-            assert parse_response(slow.result(timeout=5))[2] == b"S" * 2000
+        with socket.create_connection(("127.0.0.1", fixture.proxy_port), timeout=4) as client:
+            client.sendall(b"GET /api/submission-status HTTP/1.1\r\nHost: x\r\n\r\n")
+            client.shutdown(socket.SHUT_WR)
+            prefix = client.recv(512)
+            assert prefix.startswith(b"HTTP/1.1 201 ")
+            # C fixture의 응답 시작을 관찰한 후 다른 요청을 겹친다.
+            with ThreadPoolExecutor(max_workers=1) as reader:
+                slow = reader.submit(receive_to_eof, client)
+                check_submission(fixture, b"while-backend-waits")
+                assert not slow.done(), "submission was held until the slow query completed"
+                assert parse_response(prefix + slow.result(timeout=5))[2] == b"S" * 2000
     finally:
         fixture.query_mode("normal")
 
@@ -139,12 +170,16 @@ def check_local_io_and_shutdown(fixture):
     script = fixture.directory / "cgi-bin/b-wait.sh"
     script.write_text("#!/bin/sh\nprintf 'Content-Type: text/plain\\r\\n\\r\\n'\nsleep 1\nprintf done\n")
     script.chmod(0o755)
-    with ThreadPoolExecutor(max_workers=1) as clients:
-        slow = clients.submit(request_wire, fixture.proxy_port, b"/cgi-bin/b-wait.sh")
-        time.sleep(0.1)
-        check_submission(fixture, b"while-cgi-waits")
-        assert not slow.done(), "CGI blocked the network event worker"
-        assert parse_response(slow.result(timeout=4))[2] == b"done"
+    with socket.create_connection(("127.0.0.1", fixture.proxy_port), timeout=4) as client:
+        client.sendall(b"GET /cgi-bin/b-wait.sh HTTP/1.1\r\nHost: x\r\n\r\n")
+        client.shutdown(socket.SHUT_WR)
+        prefix = client.recv(512)
+        assert prefix.startswith(b"HTTP/1.1 200 ")
+        with ThreadPoolExecutor(max_workers=1) as clients:
+            slow = clients.submit(receive_to_eof, client)
+            check_submission(fixture, b"while-cgi-waits")
+            assert not slow.done(), "CGI blocked the network event worker"
+            assert parse_response(prefix + slow.result(timeout=4))[2] == b"done"
     # stdout EOF 뒤에도 살아 있는 CGI의 waitpid가 영구 정지를 만들지 않아야 한다.
     script.write_text("#!/bin/sh\nprintf 'Content-Type: text/plain\\r\\n\\r\\n'\nexec 1>&-\nexec sleep 30\n")
     with socket.create_connection(("127.0.0.1", fixture.proxy_port), timeout=3) as pending:

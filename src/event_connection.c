@@ -413,6 +413,11 @@ void handle_connection_event(struct event_endpoint *endpoint, uint32_t events) {
     struct event_connection *connection = endpoint->connection;
     if (connection->closing || connection->retired || endpoint->fd < 0) return;
     if (endpoint->backend && connection->phase == CONNECT_BACKEND) {
+        if (monotonic_milliseconds() >= connection->stage_deadline) {
+            fail_backend_connection(connection, ETIMEDOUT);
+            advance_connection(connection);
+            return;
+        }
         int error = 0;
         socklen_t length = sizeof(error);
         if (getsockopt(endpoint->fd, SOL_SOCKET, SO_ERROR, &error, &length) < 0) error = errno;

@@ -1,0 +1,4 @@
+# One submission backend and two equivalent query backends.
+submission 127.0.0.1:8001
+query-a 127.0.0.1:8002
+query-b 127.0.0.1:8003
