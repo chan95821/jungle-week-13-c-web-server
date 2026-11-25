@@ -1,0 +1,46 @@
+python3 scripts/verify_iter1.py
+[PASS] CLI invalid argument checks
+[PASS] curl -i 200 OK & exact response
+[PASS] 15 sequential repeated requests
+[PASS] split packet request
+[PASS] early EOF & SIGPIPE resilience
+[PASS] oversized header rejection & recovery
+[PASS] duplicate port bind failure
+[PASS] SIGINT clean shutdown
+[PASS] SO_REUSEADDR immediate restart
+[PASS] privileged port 80 bind failure
+All Iteration 1 E2E verification checks passed.
+python3 scripts/verify_iter2.py
+[PASS] GET root, hello, and query routing
+[PASS] binary, empty, fragmented, and extra-data body boundaries
+[PASS] selected header and body size boundaries
+[PASS] basic malformed/unsupported requests and method dispatch
+[PASS] 100 Continue, already-sent body, and early rejection
+Basic Iteration 2 functional checks passed. Timing/fault/load matrices are not included.
+python3 scripts/verify_iter3.py --root public --cafe pages/cafe.html --menu pages/menu.html
+[PASS] missing and non-directory root rejected
+[PASS] page mapping, MIME, binary, empty and large files
+[PASS] personal access-denied 404 policy (team 403 remains unresolved)
+[PASS] fixed filesystem boundaries; no realpath/open race guarantee
+[PASS] encoding and existing HTTP routing/echo regression
+Static checks complete; dynamic, load, race and internal fault cases not covered.
+python3 scripts/verify_iter3_dynamic.py
+[PASS] dynamic /greet, JS fetch assets, and chunked /cgi-bin/order demo
+[PASS] missing cgi-bin startup, 502 error, FD_CLOEXEC, and incomplete chunk abort
+All Iteration 3 dynamic, CGI, and chunked checks passed.
+python3 scripts/verify_iter4.py
+[PASS] routing error priority and protected Connection -> early rejection without backend; local routes intact
+[PASS] #4 hello and #17 query A/B shared round-robin
+[PASS] GET length omission, explicit lengths and empty/binary POST framing
+[PASS] submission destination, 64KiB binary POST, status and headers
+[PASS] Expect terminated at proxy, exact POST body forwarded
+[PASS] local routes, request policies and HTTP/1.1-only client requests
+[PASS] backend framing, 1xx/no-body responses, 502 and silent 504
+[PASS] refused backend connection -> 502 and recovery
+Traceback (most recent call last):
+  File "/tmp/iter5-compare-20261125/yyj/scripts/verify_iter4.py", line 431, in <module>
+    main()
+  File "/tmp/iter5-compare-20261125/yyj/scripts/verify_iter4.py", line 386, in main
+    assert wire.startswith(b"HTTP/1.1 200 "), (mode, wire)
+AssertionError: ('truncate', b'HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnection: close\r\n\r\nBad Gateway')
+make: *** [Makefile:63: verify] Error 1

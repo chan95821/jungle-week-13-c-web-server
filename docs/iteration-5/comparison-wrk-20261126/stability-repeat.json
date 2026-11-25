@@ -1,0 +1,770 @@
+{
+  "jaeseong": {
+    "fd_before": 15,
+    "binary_submit": [
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      },
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      },
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      }
+    ],
+    "distribution": [
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      }
+    ],
+    "refused": [
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      }
+    ],
+    "silent": [
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      },
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      },
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      }
+    ],
+    "truncate_wire": [
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      }
+    ],
+    "recovered": [
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      },
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      },
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      }
+    ],
+    "slow_and_fast": {
+      "fast": [
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        }
+      ],
+      "slow": {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      }
+    },
+    "after_rst": {
+      "status": 200,
+      "body": "48656c6c6f",
+      "backend": null
+    },
+    "fd_after": 15,
+    "worker_events": "N/A: threads are not independently SIGKILLable",
+    "shutdown_exit": 0
+  },
+  "chan": {
+    "fd_before": 6,
+    "binary_submit": [
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      },
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      },
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      }
+    ],
+    "distribution": [
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      }
+    ],
+    "refused": [
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      }
+    ],
+    "silent": [
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      },
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      },
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      }
+    ],
+    "truncate_wire": [
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      },
+      {
+        "prefix": "HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\nVia: 1.1 jungle-proxy\r\n",
+        "status_lines": 1,
+        "bytes": 89
+      }
+    ],
+    "recovered": [
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      },
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      },
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      }
+    ],
+    "slow_and_fast": {
+      "fast": [
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        }
+      ],
+      "slow": {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      }
+    },
+    "after_rst": {
+      "status": 200,
+      "body": "48656c6c6f",
+      "backend": null
+    },
+    "fd_after": 6,
+    "worker_events": "N/A: threads are not independently SIGKILLable",
+    "shutdown_exit": 0
+  },
+  "yyj": {
+    "fd_before": 42,
+    "binary_submit": [
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      },
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      },
+      {
+        "status": 201,
+        "backend": "submission",
+        "body_matches": true
+      }
+    ],
+    "distribution": [
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-a"
+      },
+      {
+        "status": 200,
+        "body": "737461747573007265616479ff",
+        "backend": "query-b"
+      }
+    ],
+    "refused": [
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      },
+      {
+        "status": 502,
+        "body": "4261642047617465776179",
+        "backend": null
+      }
+    ],
+    "silent": [
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      },
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      },
+      {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      }
+    ],
+    "truncate_wire": [
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      },
+      {
+        "prefix": "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnecti",
+        "status_lines": 1,
+        "bytes": 104
+      }
+    ],
+    "recovered": [
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      },
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      },
+      {
+        "status": 201,
+        "body": "61",
+        "backend": "submission"
+      }
+    ],
+    "slow_and_fast": {
+      "fast": [
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        }
+      ],
+      "slow": {
+        "status": 504,
+        "body": "476174657761792054696d656f7574",
+        "backend": null
+      }
+    },
+    "after_rst": {
+      "status": 200,
+      "body": "48656c6c6f",
+      "backend": null
+    },
+    "fd_after": 42,
+    "worker_events": [
+      {
+        "remaining": 3,
+        "hello": {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        "submit": {
+          "status": 201,
+          "body": "61",
+          "backend": "submission"
+        }
+      },
+      {
+        "remaining": 2,
+        "hello": {
+          "status": 200,
+          "body": "48656c6c6f",
+          "backend": null
+        },
+        "submit": {
+          "status": 201,
+          "body": "61",
+          "backend": "submission"
+        }
+      }
+    ],
+    "shutdown_exit": 0
+  }
+}

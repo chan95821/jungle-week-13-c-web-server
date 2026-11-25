@@ -1,0 +1,128 @@
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_parse_port tests/unit/test_parse_port.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_recv_header tests/unit/test_recv_header.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_send_all tests/unit/test_send_all.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_http_parser tests/unit/test_http_parser.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_body_send tests/unit/test_body_send.c src/distribution_policy.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_proxy_selection tests/unit/test_proxy_selection.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_proxy_protocol tests/unit/test_proxy_protocol.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+mkdir -p build/test-obj/
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -Dmalloc=proxy_test_malloc -Dcalloc=proxy_test_calloc -Dfree=proxy_test_free -c -o build/test-obj/proxy.o src/proxy.c
+mkdir -p build/test-obj/
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -Dmalloc=proxy_test_malloc -Dcalloc=proxy_test_calloc -Dfree=proxy_test_free -c -o build/test-obj/proxy_transfer.o src/proxy_transfer.c
+mkdir -p build/test-obj/
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -Dmalloc=proxy_test_malloc -Dcalloc=proxy_test_calloc -Dfree=proxy_test_free -c -o build/test-obj/proxy_io.o src/proxy_io.c
+mkdir -p build/test-obj/
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -Dmalloc=proxy_test_malloc -Dcalloc=proxy_test_calloc -Dfree=proxy_test_free -c -o build/test-obj/proxy_headers.o src/proxy_headers.c
+mkdir -p build/test-obj/
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -Dmalloc=proxy_test_malloc -Dcalloc=proxy_test_calloc -Dfree=proxy_test_free -c -o build/test-obj/proxy_body.o src/proxy_body.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_proxy_lifecycle tests/unit/test_proxy_lifecycle.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c build/test-obj/proxy.o build/test-obj/proxy_transfer.o build/test-obj/proxy_io.o build/test-obj/proxy_headers.o build/test-obj/proxy_body.o
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -o build/test_shared_backend_state tests/unit/test_shared_backend_state.c src/shared_backend_state.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -DSHARED_BACKEND_FAULT_TEST -o build/test_backend_reservations tests/unit/test_backend_reservations.c src/backend_reservations.c src/shared_backend_state.c src/distribution_policy.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -DWORKER_FD_CHANNEL_TEST -o build/test_worker_fd_channel tests/unit/test_worker_fd_channel.c src/worker_fd_channel.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -o build/test_parent_client_queue tests/unit/test_parent_client_queue.c src/parent_client_queue.c src/worker_fd_channel.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -DWORKER_FAILURE_CHANNEL_TEST -o build/test_worker_failure_channel tests/unit/test_worker_failure_channel.c src/worker_failure_channel.c src/shared_backend_state.c src/backend_reservations.c src/worker_fd_channel.c src/distribution_policy.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -DPROCESS_SIGNAL_WAIT_TEST -o build/test_process_signal_wait tests/unit/test_process_signal_wait.c src/process_signal_wait.c src/worker_failure_channel.c src/shared_backend_state.c src/parent_client_queue.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -DWORKER_CLOSED_CHANNEL_TEST -o build/test_connection_completion tests/unit/test_connection_completion.c src/parent_connection_ledger.c src/worker_closed_channel.c src/worker_fd_channel.c src/parent_client_queue.c src/distribution_policy.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -DPARENT_WORKER_SUPERVISOR_TEST -DWORKER_FD_CHANNEL_TEST -o build/test_parent_worker_supervisor tests/unit/test_parent_worker_supervisor.c src/parent_worker_supervisor.c src/parent_connection_ledger.c src/shared_backend_state.c src/backend_reservations.c src/worker_fd_channel.c src/parent_client_queue.c src/process_signal_wait.c src/worker_closed_channel.c src/distribution_policy.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -o build/test_backend_request_lifetime tests/unit/test_backend_request_lifetime.c src/backend_request_lifetime.c src/shared_backend_state.c src/backend_reservations.c src/parent_connection_ledger.c src/distribution_policy.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -DSHARED_BACKEND_FAULT_TEST -o build/test_distribution_policy tests/unit/test_distribution_policy.c src/distribution_policy.c src/backend_request_lifetime.c src/shared_backend_state.c src/backend_reservations.c src/parent_connection_ledger.c src/worker_closed_channel.c src/worker_fd_channel.c
+gcc -std=c11 -Wall -Wextra -Werror -O2 -o build/test_backend tests/backends/server.c src/socket_io.c src/http.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -o build/test_worker_http_io tests/unit/test_worker_http_io.c src/worker_cgi_io.c src/worker_file_io.c src/worker_file_bridge.c src/worker_http_io.c src/worker_proxy_io.c src/shared_backend_state.c src/backend_reservations.c src/backend_request_lifetime.c src/worker_closed_channel.c src/worker_fd_channel.c src/process_signal_wait.c src/parent_connection_ledger.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+gcc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -pthread -o build/test_worker_io_state tests/unit/test_worker_io_state.c src/worker_cgi_io.c src/worker_file_io.c src/worker_file_bridge.c src/worker_http_io.c src/worker_proxy_io.c src/shared_backend_state.c src/backend_reservations.c src/backend_request_lifetime.c src/worker_closed_channel.c src/worker_fd_channel.c src/process_signal_wait.c src/parent_connection_ledger.c src/distribution_policy.c src/server.c src/socket_io.c src/http.c src/router.c src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c src/handlers/cgi_protocol.c src/handlers/cgi_launch.c
+[PASS] test_parse_port
+[PASS] test_recv_header
+[PASS] test_send_all
+[PASS] test_http_parser
+[PASS] test_body_send
+/tmp/web-proxy-config-uEoVzR: submission, query-a, query-b, worker-policy and query-policy are required
+/tmp/web-proxy-config-uEoVzR: submission, query-a, query-b, worker-policy and query-policy are required
+/tmp/web-proxy-config-uEoVzR:2: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:2: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR: submission, query-a, query-b, worker-policy and query-policy are required
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:2: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+/tmp/web-proxy-config-uEoVzR:1: invalid or duplicate proxy setting
+[PASS] proxy config, method routing and round-robin selection
+[PASS] proxy response headers, binary framing and incomplete streams
+[PASS] proxy buffer lifetimes, allocation failures and backend FD cleanup
+layout example only: header=344 worker=40 reservation=32 journal=184 total=320760
+[PASS] shared backend initialization and mutex owner-death primitive
+[PASS] reserve/complete crash boundaries: 8 + 8
+[PASS] worker generation crash boundaries: 6
+[PASS] PREPARED recovery interrupted and recovered again: 7
+[PASS] COMMITTED/IDLE recovery interruption preserves commit: 6
+[PASS] reclaim transaction boundaries: 20
+[PASS] corrupt states: 6; corrupt recovery records: 3
+[PASS] four-process forced contention and 32 reservation/release pairs each
+[PASS] reservations: commit/rollback, recovery interruption, generation reclaim, corruption, contention
+[PASS] partial send/receive, EINTR/EAGAIN, one SCM_RIGHTS, source lifetime
+[PASS] actual socket-buffer EAGAIN and resume
+[PASS] two coalesced frames retain their own FD and metadata
+[PASS] malformed frame/ancillary including observed MSG_CTRUNC: FD counts restored
+[PASS] fork transfer with received FD 0; SIGKILL before recv and after anchor; peer EOF
+[PASS] actual TCP reset before FD receive: client cancellation, next frame intact, FD baseline restored
+[PASS] STREAM FD frames: partial I/O, ancillary once, malformed cleanup, fork/exit, FD counts
+queue storage example: item=32 owner=32 entries=4096
+[PASS] parent FIFO: capacity/wrap/ownership, accept gate, loopback pause/resume, STREAM handoff
+[PASS] separate pipe: LT wakeup, full pipe/STREAM, EINTR/EPIPE/EOF, generation and first report
+[PASS] SIGKILL at 5 publication/wakeup boundaries; no incomplete payload read
+failure storage: slot=64 report=48 initial mapping=33528 bytes
+[PASS] concurrent reports, corruption, fatal backend/unrecoverable mutex, FD cleanup
+[PASS] pending INT/TERM/CHLD and exact pre-wait boundary: 6 cases
+[PASS] wait readiness/timeout/error, errno preservation, blocked return mask
+[PASS] stop priority, ready I/O, asynchronous shutdown, caller-only multi-child reap
+[PASS] SIGCHLD finds READY/WRITING fatal reports before pipe notification
+signal context: 1008 bytes, no module-owned FD/heap
+[PASS] fork/exec mask/dispositions, parent restoration, FD cleanup
+[PASS] ledger limits, early CLOSED, stale/duplicate/owner, generation wrap, per-worker reclaim
+[PASS] selected W4/C256/G1152 capacity and retained SENDING/CLOSED accounting
+[PASS] bounded CLOSED ring, partial I/O, EINTR, actual EAGAIN/resume, EPIPE
+[PASS] malformed/coalesced frames, SCM_RIGHTS/truncation cleanup, partial EOF
+[PASS] FIFO -> actual FD handoff -> reverse CLOSED -> capacity resume; early completion
+[PASS] real SIGKILL before/partial/complete CLOSED, waitpid and exactly-once reclaim
+storage: entry=56 worker=40 ledger=72 token=48 queue=104 receiver=72
+[PASS] malformed control -> worker TERM/reap, healthy worker I/O and both ledgers preserved
+[PASS] actual 2s grace with TERM ignored, SIGKILL once, waitpid before release
+[PASS] partial FD sender and backend reservation reclaimed after actual SIGKILL
+[PASS] mutex EBUSY defers cleanup while healthy worker/control progresses, resume after unlock
+[PASS] epoll_pwait TERM and shared fatal -> queue cleanup, all-worker reap, fatal evidence retained
+[PASS] backend invariant failure -> bounded numeric diagnostic and all-worker stop
+[PASS] actual robust owner death recovery; ECHILD never authorizes signals or destruction
+[PASS] wait EINTR, kill ESRCH/EPERM, last-worker loss, no respawn, FD cleanup
+[PASS] per-worker 10ms retry, ready-I/O rate limiting, epoll timer completion without new requests
+[PASS] wait EINTR timer without new CHLD, minimum/expired/idle deadlines, clock guards, fatal priority
+supervisor storage: owner=112 worker=120 diagnostic=56
+[PASS] lock-scoped reserve, COMPLETE/FAILED/CANCELLED, first outcome, duplicate release and reset guards
+[PASS] real process mutex EBUSY retains pending token and other-worker contribution, later release
+[PASS] backend released before pending binary client output, worker count retained, half-close permits response
+[PASS] actual SIGKILL at ACTIVE/pending/released, parent generation reclaim exactly once
+[PASS] stale token cannot release reused reservation; fatal retains pending evidence
+backend lifetime: 80 bytes, no heap/FD/timer
+[PASS] EWMA/time/overflow/failure rules; four policies, unknown, tie RR and 32nd exploration
+[PASS] actual SIGKILL: timing+release 10, selection+reservation 8, recovery interrupted and recovered again
+[PASS] two-process policy selection+reservation and observed completion contention
+[PASS] CLOSED v2 timing, early/duplicate sample exactly once, worker selection, backend frozen interval
+policy storage: shared-header=344 journal=184 worker=40 entry=56 CLOSED=56 token=48 lifetime=80
+[PASS] actual fork worker/FD channel/LT TCP: local handoff, RR, split binary 64KiB POST and 100 Continue
+[PASS] slow header/backend do not block other local/submission connections; header 504
+[PASS] chunked/trailer, EOF, 1xx, 204/304, malformed/truncated backend framing
+[PASS] early 400/413, accept-time header deadline, shared selection-lock 503 and recovery
+[PASS] actual relay pause with slow reader, other connection progress, resume/binary integrity and RST recovery
+[PASS] all four configured query policies on real TCP, shared timing and selection counters
+[PASS] SIGTERM during live backend wait, worker FD cleanup, parent waitpid then reservation reclaim
+worker storage: connection=9400 reactor=232; relay cap=16384
+[PASS] actual nonblocking request-send byte budget and response-header syscall budget
+[PASS] relay high/low pause, remaining idle preservation, absolute backend deadline survives pause
+[PASS] actual mutex contention: release token and 10ms retry retained across client cleanup
+[PASS] real epoll stale-generation event ignored, write idle before/exact boundary and cancelled CLOSED
+[PASS] absolute client-body deadline; partial 100 response closes without splicing final error

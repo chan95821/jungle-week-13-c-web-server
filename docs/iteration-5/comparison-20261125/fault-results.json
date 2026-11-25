@@ -1,0 +1,142 @@
+{
+  "jaeseong": {
+    "initial_fds": 15,
+    "normal_submit": {
+      "status": 201,
+      "body": "a\u0000b"
+    },
+    "normal_query": [
+      {
+        "status": 200,
+        "body": "Hello"
+      },
+      {
+        "status": 200,
+        "body": "Hello"
+      }
+    ],
+    "refused": {
+      "status": 502,
+      "body": "Bad Gateway"
+    },
+    "alive_after_refused": {
+      "status": 200,
+      "body": "Hello"
+    },
+    "silent": {
+      "status": 504,
+      "body": "Gateway Timeout"
+    },
+    "truncate": {
+      "error": "IncompleteRead",
+      "message": "IncompleteRead(7 bytes read, 121 more expected)"
+    },
+    "recovery": {
+      "status": 201,
+      "body": "a"
+    },
+    "alive_after_rst": {
+      "status": 200,
+      "body": "Hello"
+    },
+    "after_fds": 15,
+    "worker_kill": "N/A: worker threads cannot be independently SIGKILLed",
+    "sigterm_exit": 0
+  },
+  "chan": {
+    "initial_fds": 6,
+    "normal_submit": {
+      "status": 201,
+      "body": "a\u0000b"
+    },
+    "normal_query": [
+      {
+        "status": 200,
+        "body": "Hello"
+      },
+      {
+        "status": 200,
+        "body": "Hello"
+      }
+    ],
+    "refused": {
+      "status": 502,
+      "body": "Bad Gateway"
+    },
+    "alive_after_refused": {
+      "status": 200,
+      "body": "Hello"
+    },
+    "silent": {
+      "status": 504,
+      "body": "Gateway Timeout"
+    },
+    "truncate": {
+      "error": "IncompleteRead",
+      "message": "IncompleteRead(7 bytes read, 121 more expected)"
+    },
+    "recovery": {
+      "status": 201,
+      "body": "a"
+    },
+    "alive_after_rst": {
+      "status": 200,
+      "body": "Hello"
+    },
+    "after_fds": 6,
+    "worker_kill": "N/A: worker threads cannot be independently SIGKILLed",
+    "sigterm_exit": 0
+  },
+  "yyj": {
+    "initial_fds": 42,
+    "normal_submit": {
+      "status": 201,
+      "body": "a\u0000b"
+    },
+    "normal_query": [
+      {
+        "status": 200,
+        "body": "Hello"
+      },
+      {
+        "status": 200,
+        "body": "Hello"
+      }
+    ],
+    "refused": {
+      "status": 502,
+      "body": "Bad Gateway"
+    },
+    "alive_after_refused": {
+      "status": 200,
+      "body": "Hello"
+    },
+    "silent": {
+      "status": 504,
+      "body": "Gateway Timeout"
+    },
+    "truncate": {
+      "status": 502,
+      "body": "Bad Gateway"
+    },
+    "recovery": {
+      "status": 201,
+      "body": "a"
+    },
+    "alive_after_rst": {
+      "status": 200,
+      "body": "Hello"
+    },
+    "after_fds": 42,
+    "worker_kill": {
+      "parent_alive": true,
+      "children_before": 4,
+      "children_after": 3,
+      "hello": {
+        "status": 200,
+        "body": "Hello"
+      }
+    },
+    "sigterm_exit": 0
+  }
+}

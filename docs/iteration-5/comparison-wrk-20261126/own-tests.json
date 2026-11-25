@@ -1,0 +1,32 @@
+{
+  "jaeseong": {
+    "test": {
+      "exit": 0,
+      "log": "/tmp/iter5-compare-20261125/jaeseong-test.log"
+    },
+    "verify": {
+      "exit": 0,
+      "log": "/tmp/iter5-compare-20261125/jaeseong-verify.log"
+    }
+  },
+  "chan": {
+    "test": {
+      "exit": 0,
+      "log": "/tmp/iter5-compare-20261125/chan-test.log"
+    },
+    "verify": {
+      "exit": 0,
+      "log": "/tmp/iter5-compare-20261125/chan-verify.log"
+    }
+  },
+  "yyj": {
+    "test": {
+      "exit": 0,
+      "log": "/tmp/iter5-compare-20261125/yyj-test.log"
+    },
+    "verify": {
+      "exit": 2,
+      "log": "/tmp/iter5-compare-20261125/yyj-verify.log"
+    }
+  }
+}

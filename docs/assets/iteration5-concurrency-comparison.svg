@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="410" viewBox="0 0 1120 410" role="img" aria-labelledby="title desc">
+<title id="title">동시 연결 1,000개: 세 동시성 모델 성공 처리량 비교</title>
+<desc id="desc">제출과 조회 각각 30초 세 번 측정한 성공 처리량 중앙값.</desc>
+<style>text{font-family:Malgun Gothic,Apple SD Gothic Neo,sans-serif;fill:#172b40}.small{font-size:13px}.label{font-size:14px}.head{font-size:19px;font-weight:700}</style>
+<rect x="1" y="1" width="1118" height="408" rx="14" fill="white" stroke="#d2dbe5"/>
+<text x="28" y="36" class="head">동시 연결 1,000개 · 제출과 조회 분리 측정</text>
+<text x="28" y="61" class="small">wrk · 작업자 4개 · 요청마다 새 연결 · 각 30초 × 3회 중앙값</text>
+<text x="28" y="103" class="head">성공 처리량 (req/s) — 높을수록 좋음</text>
+<path d="M260.0,120 V277" stroke="#e6ebf1"/><text x="260.0" y="300" text-anchor="middle" class="small">0</text>
+<path d="M457.5,120 V277" stroke="#e6ebf1"/><text x="457.5" y="300" text-anchor="middle" class="small">5,000</text>
+<path d="M655.0,120 V277" stroke="#e6ebf1"/><text x="655.0" y="300" text-anchor="middle" class="small">10,000</text>
+<path d="M852.5,120 V277" stroke="#e6ebf1"/><text x="852.5" y="300" text-anchor="middle" class="small">15,000</text>
+<path d="M1050.0,120 V277" stroke="#e6ebf1"/><text x="1050.0" y="300" text-anchor="middle" class="small">20,000</text>
+<text x="245" y="150" text-anchor="end" class="label">스레드별 epoll</text>
+<rect x="260" y="129" width="635.9105919521116" height="15" rx="3" fill="#1264d6" opacity="1"/>
+<text x="902.9105919521116" y="141" class="small">16,099</text>
+<rect x="260" y="148" width="721.3262221483205" height="15" rx="3" fill="#1264d6" opacity=".45"/>
+<text x="988.3262221483205" y="160" class="small">18,261</text>
+<text x="245" y="199" text-anchor="end" class="label">Blocking 스레드 풀</text>
+<rect x="260" y="178" width="163.6280272787758" height="15" rx="3" fill="#d33d50" opacity="1"/>
+<text x="430.6280272787758" y="190" class="small">4,142</text>
+<rect x="260" y="197" width="176.3676969092722" height="15" rx="3" fill="#d33d50" opacity=".45"/>
+<text x="443.36769690927224" y="209" class="small">4,465</text>
+<text x="245" y="248" text-anchor="end" class="label">프로세스별 epoll</text>
+<rect x="260" y="227" width="688.9115474209651" height="15" rx="3" fill="#15957c" opacity="1"/>
+<text x="955.9115474209651" y="239" class="small">17,441</text>
+<rect x="260" y="246" width="634.6043956043956" height="15" rx="3" fill="#15957c" opacity=".45"/>
+<text x="901.6043956043956" y="258" class="small">16,066</text>
+<text x="28" y="344" class="label">각 쌍: 위쪽 진한 막대 = 제출 · 아래쪽 연한 막대 = 조회</text>
+<text x="28" y="378" class="small">정상 응답만 집계한 처리량. 오류 응답·안정성 및 측정 조건의 한계는 본문 참조.</text>
+</svg>

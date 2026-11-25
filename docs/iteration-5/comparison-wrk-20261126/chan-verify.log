@@ -1,0 +1,97 @@
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -o build/test_backend tests/backends/server.c src/socket_io.c src/http.c
+python3 scripts/verify_iter1.py
+[PASS] CLI invalid argument checks
+[PASS] curl -i 200 OK & exact response
+[PASS] 15 sequential repeated requests
+[PASS] split packet request
+[PASS] early EOF & SIGPIPE resilience
+[PASS] oversized header rejection & recovery
+[PASS] duplicate port bind failure
+[PASS] SIGINT clean shutdown
+[PASS] SO_REUSEADDR immediate restart
+[PASS] privileged port 80 bind failure
+All Iteration 1 E2E verification checks passed.
+python3 scripts/verify_iter2.py
+[PASS] GET root, hello, and query routing
+[PASS] binary, empty, fragmented, and extra-data body boundaries
+[PASS] selected header and body size boundaries
+[PASS] basic malformed/unsupported requests and method dispatch
+[PASS] 100 Continue, already-sent body, and early rejection
+Basic Iteration 2 functional checks passed. Timing/fault/load matrices are not included.
+python3 scripts/verify_iter3.py --root public --cafe pages/cafe.html --menu pages/menu.html
+[PASS] missing and non-directory root rejected
+[PASS] page mapping, MIME, binary, empty and large files
+[PASS] personal access-denied 404 policy (team 403 remains unresolved)
+[PASS] fixed filesystem boundaries; no realpath/open race guarantee
+[PASS] encoding and existing HTTP routing/echo regression
+Static checks complete; dynamic, load, race and internal fault cases not covered.
+python3 scripts/verify_iter3_dynamic.py
+[PASS] dynamic /greet, JS fetch assets, and chunked /cgi-bin/order demo
+[PASS] missing cgi-bin startup, 502 error, FD_CLOEXEC, and incomplete chunk abort
+All Iteration 3 dynamic, CGI, and chunked checks passed.
+python3 scripts/verify_iter4.py
+[PASS] routing error priority and protected Connection -> early rejection without backend; local routes intact
+[PASS] #4 hello and #17 query A/B shared round-robin
+[PASS] GET length omission, explicit lengths and empty/binary POST framing
+[PASS] submission destination, 64KiB binary POST, status and headers
+[PASS] Expect terminated at proxy, exact POST body forwarded
+[PASS] local routes, request policies and HTTP/1.1-only client requests
+[PASS] backend framing, 1xx/no-body responses, 502 and silent 504
+[PASS] refused backend connection -> 502 and recovery
+[PASS] truncated/invalid/timed-out bodies remain detectably incomplete
+[PASS] repeated failures/client resets reclaim proxy FDs
+[PASS] SIGINT/SIGTERM during backend wait
+Iteration 4 functional verification finished; no performance measurements.
+python3 scripts/verify_edge_cases.py
+[PASS] E01 missing Host
+[PASS] E02 invalid method
+[PASS] E03 lowercase method
+[PASS] E04 empty method
+[PASS] E05 HTTP/1.0 client
+[PASS] E06 HTTP/2.0 client
+[PASS] E07 invalid version
+[PASS] E08 request-line suffix
+[PASS] E09 missing colon
+[PASS] E10 header-name space
+[PASS] E11 header control
+[PASS] E12 space before colon
+[PASS] E13 HEAD no body
+[PASS] E14 unframed extra data
+[PASS] E15 incomplete header EOF
+[PASS] E16 incomplete header idle
+[PASS] E17 incomplete body idle
+[PASS] E18 empty connection survival
+[PASS] E19 long URI within header cap
+[PASS] E20 long hello query
+[PASS] E21 URI exceeds header cap
+[PASS] E22 64KiB echo
+[PASS] E23 65537 declaration
+[PASS] E24 10MiB declaration
+[PASS] E25 bounded extra stream after early 413
+[PASS] E26 recovery and FD reclamation
+[PASS] E27 64KiB proxy POST
+[PASS] E28 oversized proxy declaration
+[PASS] E29 slowly progressing body
+[PASS] E30 delayed header uses selected 1s deadline
+[PASS] E31 silent backend
+[PASS] E32 query survives submit timeout
+[PASS] E33 partial backend header
+[PASS] E34 body stall without second response
+[PASS] C2 selected Host rewrite contract
+[PASS] routing error priority and protected Connection -> early rejection without backend; local routes intact
+[PASS] C3 protected header early rejection
+[PASS] C7 HTTP/1.0 backend normalization
+[PASS] C12 total header deadline with ongoing bytes
+[PASS] C13 SIGTERM after backend reception
+[PASS] C14 selected required-config contract
+Edge checks: 40 passed, 0 failed, 0 skipped.
+Functional deadlines only; no load/performance measurements.
+python3 scripts/verify_iter5.py
+[PASS] CLI [workers] validation and startup
+[PASS] HoL isolation (K < W): fast requests complete without waiting
+[PASS] C-model limit (K == W): 3rd request queues until worker frees
+[PASS] Concurrent normal (120 reqs, 50:50 A/B) & error paths (400/404/502/504), FD reclamation
+[PASS] Idle SIGINT/SIGTERM shutdown <= 0.75s
+[PASS] SIGTERM with busy worker + queued requests exits <= 0.75s and closes FDs
+[PASS] SIGTERM during slow CGI streaming exits <= 0.75s
+[PASS] Queued request exceeding HEADER_DEADLINE_SECONDS (7s) receives 408
