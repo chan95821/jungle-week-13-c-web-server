@@ -2,6 +2,16 @@
 
 ## 2026-11-24 Iteration 4 사용자 결정
 
+### 프록시 처리 함수 이름 변경
+
+- 사용자 요청: Forward Proxy와 혼동되는 함수 이름을 바꾸고, relay 같은 낯선 단어도 피한다.
+- `handle_reverse_proxy_request()`로 이름을 변경한다. 의미는 "리버스 프록시 요청을 처리한다"이며 기존 handle_client 계열 이름과 맞춘다.
+- 선언·정의·호출부·관련 주석과 문서만 맞추고 인자·반환 규칙·HTTP 동작·FD 소유권은 유지한다.
+
+- 후속 사용자 요청: 이번 Reverse Proxy의 모든 함수 이름이 의도를 드러내도록 변경한다. 이미 명확해진 `handle_reverse_proxy_request`는 유지하고 나머지 49개 함수 식별자를 변경한다.
+- 명명 기준: backend/client로 통신 대상을 표현하고 choose/connect/receive/read/parse/build/send로 행동을 표현한다. Forward Proxy와 혼동되는 forward 및 낯선 relay는 함수명에서 사용하지 않는다.
+- 기존 서버·HTTP·라우터·핸들러 함수 이름은 유지하며, main/server에는 변경한 프록시 공개 함수의 호출 이름만 반영한다. 기존 반환값과 오류 정책은 이번 이름 변경에서 수정하지 않는다.
+
 ### 프록시 가독성 정리 요청
 
 - 사용자 요청: 이번에 만든 proxy 부분만 모듈화·클린 코드로 정리한다. pull로 받은 기존 구현은 정리 범위에서 제외한다.

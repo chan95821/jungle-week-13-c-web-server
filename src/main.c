@@ -40,9 +40,9 @@ int main(int argc, char *argv[]) {
     /* 설정·조회 순번의 소유자는 main이다. 전역 연결 상태를 만들지 않고
      * 호출 인자로 전달한다. 기존 ./build/server 8080 실행도 계속 지원한다. */
     struct proxy_config proxy = {0};
-    if (argc == 5 && (proxy_parse_endpoint(argv[2], &proxy.submission) < 0 ||
-                      proxy_parse_endpoint(argv[3], &proxy.status[0]) < 0 ||
-                      proxy_parse_endpoint(argv[4], &proxy.status[1]) < 0)) {
+    if (argc == 5 && (parse_backend_address(argv[2], &proxy.submission) < 0 ||
+                      parse_backend_address(argv[3], &proxy.status[0]) < 0 ||
+                      parse_backend_address(argv[4], &proxy.status[1]) < 0)) {
         fprintf(stderr, "Invalid backend endpoint; use numeric IPv4:port (1..65535)\n");
         return 1;
     }

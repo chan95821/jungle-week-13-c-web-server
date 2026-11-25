@@ -372,7 +372,7 @@ void handle_client_with_proxy(int connfd, const volatile sig_atomic_t *running,
     if (status) goto respond;
     /* API 경로만 먼저 분기한다. 그 외 경로와 프록시 미설정 실행은
      * 기존 라우터를 그대로 거쳐 정적·동적·CGI 서빙을 유지한다. */
-    if (proxy) proxy_route = proxy_select_route(&request, &allow);
+    if (proxy) proxy_route = choose_reverse_proxy_route(&request, &allow);
     if (proxy_route < 0) status = -proxy_route;
     else if (proxy_route == PROXY_LOCAL)
         status = http_select_handler(&request, &route_handler_func, &allow);
@@ -413,11 +413,12 @@ void handle_client_with_proxy(int connfd, const volatile sig_atomic_t *running,
         /* 요청은 기존 상한(64KiB) 안에서 완전히 받은 뒤 백엔드로 보낸다.
          * 따라서 클라이언트 100-continue는 위에서 처리하고 백엔드에는
          * Expect를 넘기지 않는다. 응답 전체를 저장하는 동작은 하지 않는다. */
-        int forwarded = proxy_forward(connfd, &request, header, header_end,
-                                       (enum proxy_route)proxy_route, proxy, running);
-        if (forwarded == 0) finish_response(connfd, &output);
-        if (forwarded <= 0) goto cleanup;
-        status = forwarded;
+        int proxy_result = handle_reverse_proxy_request(
+            connfd, &request, header, header_end,
+            (enum proxy_route)proxy_route, proxy, running);
+        if (proxy_result == 0) finish_response(connfd, &output);
+        if (proxy_result <= 0) goto cleanup;
+        status = proxy_result;
         goto respond;
     }
     status = 200;

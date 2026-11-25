@@ -51,14 +51,14 @@ curl --noproxy '*' -i http://127.0.0.1:8080/cafe
 
 ## 3. main → handle_client_with_proxy
 
-- `src/main.c`: CLI를 검사해 `proxy_config`를 스택에 만든다. 백엔드 주소는 `proxy_parse_endpoint`로 검사한다. `socket/bind/listen/accept`, `htons/htonl`은 POSIX/소켓 API이며 `open_listenfd`, `parse_port`, `proxy_parse_endpoint`는 직접 만든 함수다.
+- `src/main.c`: CLI를 검사해 `proxy_config`를 스택에 만든다. 백엔드 주소는 `parse_backend_address`로 검사한다. `socket/bind/listen/accept`, `htons/htonl`은 POSIX/소켓 API이며 `open_listenfd`, `parse_port`, `parse_backend_address`는 직접 만든 함수다.
 - 주소는 숫자 IPv4만 받는다. DNS·IPv6·TLS·CONNECT는 이번 초안 범위 밖이다. `inet_pton`으로 주소를 바이너리로, `htons`로 포트를 네트워크 바이트 순서로 바꾼다. TCP가 이 애플리케이션 설정 변환을 대신하지 않는다.
-- `src/server.c`: `handle_client_with_proxy`가 헤더 수신·기존 HTTP 파싱을 먼저 한다. 프록시 설정이 있고 지정 API면 `proxy_select_route`로 분기하고 그 외는 기존 라우터를 쓴다.
+- `src/server.c`: `handle_client_with_proxy`가 헤더 수신·기존 HTTP 파싱을 먼저 한다. 프록시 설정이 있고 지정 API면 `choose_reverse_proxy_route`로 분기하고 그 외는 기존 라우터를 쓴다.
 - 요청 본문은 기존처럼 Content-Length만큼 한 번 할당하며 최대 64KiB다. 이미 헤더와 같이 받은 본문은 복사하고 부족분만 받는다. `Expect: 100-continue`는 기존 수신 흐름이 처리한다.
-- 전체 본문을 받은 다음 `proxy_forward`로 넘긴다. 따라서 **요청은 버퍼링, 응답은 스트리밍**이다. 저속 클라이언트 요청을 백엔드에 조금씩 바로 넘기는 구조는 아니다.
+- 전체 본문을 받은 다음 `handle_reverse_proxy_request`로 넘긴다. 따라서 **요청은 버퍼링, 응답은 스트리밍**이다. 저속 클라이언트 요청을 백엔드에 조금씩 바로 넘기는 구조는 아니다.
 - 기존 `handle_client`는 프록시 없는 wrapper로 유지해 기존 호출자·단위 계약을 보존한다.
 
-## 4. proxy_forward — 위에서 아래로 읽기
+## 4. handle_reverse_proxy_request — 위에서 아래로 읽기
 
 가독성 정리 후에도 동작·상한·FD 소유권은 같다. 외부 호출자는 기존 `src/proxy.h`만 사용하며, 내부 계약은 `src/proxy/internal.h`에 모았다.
 
@@ -70,24 +70,38 @@ curl --noproxy '*' -i http://127.0.0.1:8080/cafe
 | `src/proxy/body.c` | 고정 길이·chunked·EOF 본문 중계와 완료 판정 |
 | `src/proxy/internal.h` | 프록시 내부 함수·reader·응답 정보·기존 상수 |
 
-`proxy_forward()`는 다음 순서로 읽는다.
+`handle_reverse_proxy_request()`는 다음 순서로 읽는다.
 
-1. `proxy_build_request_headers`: 원본 request-line·Host·end-to-end 헤더를 보존하고 연결 전용 필드와 이미 처리한 Expect를 제거한다. Content-Length·Connection: close·Via를 만든다. Connection이 Host를 지명하면 기존 개인 정책대로 400이다.
-2. `select_backend`: 제출은 고정 서버, 조회는 `next_status`의 A/B 하나를 선택하고 순번을 이동한다. 연결 실패 시에도 이 순서는 같다. 재시도하지 않는다.
-3. `proxy_connect_backend`: nonblocking connect를 최대 1초 기다리고 SO_ERROR를 확인한다. 내부에서 생성에 실패한 FD는 정리하고, 성공 FD만 proxy_forward에 넘긴다.
-4. `send_backend_request`: `proxy_write_all`로 헤더 다음에 정확한 요청 본문을 전송한다. short count를 누적하고 송신 진전이 있을 때만 무진행 기한을 갱신한다.
-5. `proxy_prepare_response_headers`: reader로 최종 헤더를 읽고 검사한 뒤 client용 헤더를 만든다. 1xx는 기존 총량 한도 안에서 소비한다. 헤더와 동반 도착한 본문은 reader에 남는다. 프로토콜 오류는 EPROTO로 알리고 proxy_forward가 502로 매핑한다.
+1. `build_backend_request_headers`: 원본 request-line·Host·end-to-end 헤더를 보존하고 연결 전용 필드와 이미 처리한 Expect를 제거한다. Content-Length·Connection: close·Via를 만든다. Connection이 Host를 지명하면 기존 개인 정책대로 400이다.
+2. `choose_backend_address`: 제출은 고정 서버, 조회는 `next_status`의 A/B 하나를 선택하고 순번을 이동한다. 연결 실패 시에도 이 순서는 같다. 재시도하지 않는다.
+3. `connect_to_backend`: nonblocking connect를 최대 1초 기다리고 SO_ERROR를 확인한다. 내부에서 생성에 실패한 FD는 정리하고, 성공 FD만 handle_reverse_proxy_request에 넘긴다.
+4. `send_request_to_backend`: `send_all_bytes`로 헤더 다음에 정확한 요청 본문을 전송한다. short count를 누적하고 송신 진전이 있을 때만 무진행 기한을 갱신한다.
+5. `prepare_client_response_headers`: reader로 최종 헤더를 읽고 검사한 뒤 client용 헤더를 만든다. 1xx는 기존 총량 한도 안에서 소비한다. 헤더와 동반 도착한 본문은 reader에 남는다. 프로토콜 오류는 EPROTO로 알리고 handle_reverse_proxy_request가 502로 매핑한다.
 6. client를 nonblocking으로 설정하고 응답 송신 경계를 표시한다. 첫 send 시도부터 실패는 -1로만 반환한다. 부분 성공 가능성이 있으므로 그 뒤에는 새 오류 응답을 보내지 않는다.
-7. `proxy_relay_response_body`: 204/304는 본문 없이 완료한다. 그 외는 Content-Length → chunked → EOF 순으로 분기한다. 이 함수와 하위 함수는 FD를 닫지 않는다.
+7. `send_backend_response_body_to_client`: 204/304는 본문 없이 완료한다. 그 외는 Content-Length → chunked → EOF 순으로 분기한다. 이 함수와 하위 함수는 FD를 닫지 않는다.
 8. `cleanup`: backend FD를 한 번 닫고 client 플래그를 복원한다. client 최종 close는 main, 요청 본문 free는 handle_client가 계속 맡는다.
 
 본문 세부 흐름은 `body.c`에서 이어 읽는다.
 
-- `relay_fixed_bytes`: reader의 남은 본문부터 선언 길이만큼 전송한다. 중간 EOF는 EPROTO이며 새 오류 응답을 만들지 않는다. `BODY_RAW_BYTES`와 `BODY_AS_CHUNKS` 이름으로 출력 방식을 구분한다.
-- `relay_chunked_body`: 크기 줄 → 본문 → CRLF 순서로 소비한다. 확장 문법, 따옴표 값, trailer는 각각 작은 함수가 검사한다. 모든 청크와 trailer가 정상 완료된 뒤에만 최종 0청크를 보낸다.
-- `relay_eof_body`: 받은 바이트를 재청크하고 정상 EOF에만 최종 청크를 보낸다. **길이가 없는 경우 정상 FIN과 의도치 않은 깨끗한 조기 FIN을 구별할 수 없는 한계는 유지된다.**
+- `send_fixed_length_body_to_client`: reader의 남은 본문부터 선언 길이만큼 전송한다. 중간 EOF는 EPROTO이며 새 오류 응답을 만들지 않는다. `BODY_RAW_BYTES`와 `BODY_AS_CHUNKS` 이름으로 출력 방식을 구분한다.
+- `send_chunked_body_to_client`: 크기 줄 → 본문 → CRLF 순서로 소비한다. 확장 문법, 따옴표 값, trailer는 각각 작은 함수가 검사한다. 모든 청크와 trailer가 정상 완료된 뒤에만 최종 0청크를 보낸다.
+- `send_body_until_backend_closes`: 받은 바이트를 재청크하고 정상 EOF에만 최종 청크를 보낸다. **길이가 없는 경우 정상 FIN과 의도치 않은 깨끗한 조기 FIN을 구별할 수 없는 한계는 유지된다.**
 
-CS:APP의 RIO처럼 short count를 누적하고 바이트 길이로 처리하지만, `proxy_write_all`, `proxy_reader_*`, `relay_*`는 이 프로젝트의 직접 구현이다. HTTP 메시지 경계는 TCP 패킷·recv 호출 경계와 다르다.
+CS:APP의 RIO처럼 short count를 누적하고 바이트 길이로 처리하지만, `send_all_bytes`, `read_backend_byte`, `read_backend_line`과 본문 전송 함수는 이 프로젝트의 직접 구현이다. HTTP 메시지 경계는 TCP 패킷·recv 호출 경계와 다르다.
+
+함수 이름은 호출 순서에서 대상과 행동이 드러나도록 맞췄다. `backend`는 내부 서버, `client`는 학생 연결이다. `receive`는 실제 소켓 수신, `read`는 수신 버퍼를 포함한 읽기, `parse`는 바이트의 의미 해석, `build`는 보낼 헤더 생성, `send`는 송신을 뜻한다.
+
+```text
+choose_reverse_proxy_route()                 요청 경로·메서드로 처리 종류 선택
+  → handle_reverse_proxy_request()           프록시 요청 전체 처리
+      → build_backend_request_headers()     백엔드용 요청 헤더 생성
+      → choose_backend_address()            제출 또는 조회 A/B 주소 선택
+      → connect_to_backend()                백엔드 연결
+      → send_request_to_backend()           요청 전송
+      → prepare_client_response_headers()   백엔드 응답을 읽어 학생용 헤더 준비
+      → send_all_bytes()                    학생에게 헤더 전송
+      → send_backend_response_body_to_client() 학생에게 본문 전송
+```
 
 ## 5. 오류·제한·동시성
 

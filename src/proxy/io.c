@@ -10,31 +10,31 @@
 #include <time.h>
 #include <unistd.h>
 
-bool proxy_is_running(const volatile sig_atomic_t *running) {
+bool is_server_running(const volatile sig_atomic_t *running) {
     return !running || *running;
 }
 
-static int64_t monotonic_milliseconds(void) {
+static int64_t get_monotonic_time_ms(void) {
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
     return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
 
-static bool retryable_io_error(void) {
+static bool is_retryable_socket_error(void) {
     return errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
 /* EINTR는 진행이 아니므로 원래 deadline을 유지한다.
  * poll은 한 FD의 준비 상태만 기다린다. 다중 연결 이벤트 루프는 아니다. */
-static int wait_for_socket(int fd, short events, int64_t deadline,
+static int wait_until_socket_ready(int fd, short events, int64_t deadline,
                             const volatile sig_atomic_t *running) {
     for (;;) {
-        if (!proxy_is_running(running)) {
+        if (!is_server_running(running)) {
             errno = ECANCELED;
             return -1;
         }
 
-        int64_t now = monotonic_milliseconds();
+        int64_t now = get_monotonic_time_ms();
         if (now < 0) return -1;
         int64_t remaining_ms = deadline - now;
         if (remaining_ms <= 0) {
@@ -46,7 +46,7 @@ static int wait_for_socket(int fd, short events, int64_t deadline,
         int timeout_ms = remaining_ms > INT_MAX ? INT_MAX : (int)remaining_ms;
         int ready = poll(&socket_event, 1, timeout_ms);
 
-        if (!proxy_is_running(running)) {
+        if (!is_server_running(running)) {
             errno = ECANCELED;
             return -1;
         }
@@ -67,7 +67,7 @@ static int wait_for_socket(int fd, short events, int64_t deadline,
     }
 }
 
-int proxy_connect_backend(const struct sockaddr_in *address,
+int connect_to_backend(const struct sockaddr_in *address,
                           const volatile sig_atomic_t *running) {
     int backend_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (backend_fd < 0) return -1;
@@ -77,12 +77,12 @@ int proxy_connect_backend(const struct sockaddr_in *address,
         fcntl(backend_fd, F_SETFL, flags | O_NONBLOCK) < 0 ||
         fcntl(backend_fd, F_SETFD, FD_CLOEXEC) < 0) goto failed;
 
-    int64_t started_at = monotonic_milliseconds();
+    int64_t started_at = get_monotonic_time_ms();
     if (started_at < 0) goto failed;
 
     if (connect(backend_fd, (const struct sockaddr *)address, sizeof(*address)) < 0) {
         if (errno != EINPROGRESS && errno != EINTR) goto failed;
-        if (wait_for_socket(backend_fd, POLLOUT,
+        if (wait_until_socket_ready(backend_fd, POLLOUT,
                             started_at + PROXY_BACKEND_TIMEOUT_MS, running) < 0) goto failed;
 
         /* 쓰기 준비가 연결 성공을 뜻하지는 않는다. 연결 거절도 준비 상태로
@@ -109,17 +109,17 @@ failed: {
 
 /* CS:APP RIO의 완전 송신과 같은 원리로 short count를 누적하는 직접 구현.
  * 실제 송신이 진행했을 때만 무진행 기한을 갱신한다. 전체 응답 기한은 아니다. */
-int proxy_write_all(int fd, const void *data, size_t length, int timeout_ms,
+int send_all_bytes(int fd, const void *data, size_t length, int timeout_ms,
                     const volatile sig_atomic_t *running) {
     const unsigned char *next_byte = data;
-    int64_t last_progress = monotonic_milliseconds();
+    int64_t last_progress = get_monotonic_time_ms();
     if (last_progress < 0) return -1;
 
     while (length > 0) {
-        if (wait_for_socket(fd, POLLOUT, last_progress + timeout_ms, running) < 0) return -1;
+        if (wait_until_socket_ready(fd, POLLOUT, last_progress + timeout_ms, running) < 0) return -1;
 
         ssize_t sent = send(fd, next_byte, length, 0);
-        if (sent < 0 && retryable_io_error()) continue;
+        if (sent < 0 && is_retryable_socket_error()) continue;
         if (sent < 0) return -1;
         if (sent == 0) {
             errno = EIO;
@@ -128,22 +128,22 @@ int proxy_write_all(int fd, const void *data, size_t length, int timeout_ms,
 
         next_byte += sent;
         length -= (size_t)sent;
-        last_progress = monotonic_milliseconds();
+        last_progress = get_monotonic_time_ms();
         if (last_progress < 0) return -1;
     }
     return 0;
 }
 
-ssize_t proxy_reader_fill(struct proxy_reader *reader) {
-    int64_t started_at = monotonic_milliseconds();
+ssize_t receive_backend_bytes(struct proxy_reader *reader) {
+    int64_t started_at = get_monotonic_time_ms();
     if (started_at < 0) return -1;
 
     for (;;) {
-        if (wait_for_socket(reader->backend_fd, POLLIN,
+        if (wait_until_socket_ready(reader->backend_fd, POLLIN,
                             started_at + PROXY_BACKEND_TIMEOUT_MS, reader->running) < 0) return -1;
 
         ssize_t received = recv(reader->backend_fd, reader->buffer, sizeof(reader->buffer), 0);
-        if (received < 0 && retryable_io_error()) continue;
+        if (received < 0 && is_retryable_socket_error()) continue;
         if (received >= 0) {
             reader->position = 0;
             reader->length = (size_t)received;
@@ -152,9 +152,9 @@ ssize_t proxy_reader_fill(struct proxy_reader *reader) {
     }
 }
 
-int proxy_reader_read_byte(struct proxy_reader *reader, unsigned char *byte) {
+int read_backend_byte(struct proxy_reader *reader, unsigned char *byte) {
     if (reader->position == reader->length) {
-        ssize_t received = proxy_reader_fill(reader);
+        ssize_t received = receive_backend_bytes(reader);
         if (received < 0) return -1;
         if (received == 0) {
             errno = EPROTO;
@@ -167,11 +167,11 @@ int proxy_reader_read_byte(struct proxy_reader *reader, unsigned char *byte) {
     return 0;
 }
 
-int proxy_reader_read_line(struct proxy_reader *reader, unsigned char *line,
+int read_backend_line(struct proxy_reader *reader, unsigned char *line,
                            size_t capacity, size_t *length) {
     *length = 0;
     while (*length < capacity) {
-        if (proxy_reader_read_byte(reader, line + *length) < 0) return -1;
+        if (read_backend_byte(reader, line + *length) < 0) return -1;
         ++*length;
 
         if (*length >= 2 && line[*length - 2] == '\r' && line[*length - 1] == '\n') return 0;
