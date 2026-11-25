@@ -55,6 +55,7 @@ static void check_deadline_heap(void) {
         connections[i].heap_index = SIZE_MAX;
         connections[i].phase = READ_CLIENT_HEADER;
         connections[i].stage_deadline = deadlines[i];
+        connections[i].client_idle_deadline = 100;
         update_connection_timer(&connections[i]);
     }
     assert(worker.timers[0] == &connections[1]);

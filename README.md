@@ -1,17 +1,37 @@
 # jungle-week-13-c-web-server
 
-C/POSIX HTTP 서버와 순차 Reverse Proxy의 Iteration 4 개인 구현이다. 기준은 Issue #4·#17과 현재 팀의 정적·동적 응답 코드다. 동시성은 Iteration 5에서 구현한다.
+C/POSIX HTTP 서버와 Reverse Proxy의 Iteration 5 **B 후보**다. 기본 실행은 고정 네트워크 스레드 + 스레드별 epoll이다. 기준 HTTP·라우팅 계약은 기존 팀 Iteration 4 코드를 유지한다.
+
+## 현재 B 구조
+
+~~~text
+main: accept4 → 상한 있는 worker 큐 → eventfd 알림
+  ├─ worker 1: epoll → 여러 client/backend의 nonblocking 상태 머신
+  ├─ worker 2: epoll → 여러 client/backend의 nonblocking 상태 머신
+  └─ ... (기본 4)
+파일·CGI 대기: 고정 보조 I/O 스레드 2개 (대기 큐 256)
+조회 A/B 선택: 프로세스 전체 RR, 짧은 mutex로 순번만 보호
+~~~
+
+작업자 하나가 여러 연결을 이어 처리한다. client/backend socket I/O에는 기존 blocking `handle_client`를 호출하지 않는다. `server.c`의 순차 경로는 기존 단위 테스트와 기준 동작 설명을 위해 남아 있다.
+
+- [요구사항과 선택 이유](docs/iteration-5/jaeseong/iteration-5-requirements.md)
+- [요청부터 종료까지 코드 흐름](docs/iteration-5/jaeseong/iteration-5-walkthrough.md)
+- [기능 검증 범위와 결과](docs/iteration-5/jaeseong/iteration-5-tests.md)
+- [성능 측정 제안](docs/iteration-5/jaeseong/iteration-5-performance-plan.md)
+
+B는 Linux/WSL2의 epoll/eventfd/signalfd를 사용한다. 기존 Ubuntu가 VHDX 오류로 실행되지 않아 이번 개발·검증은 Debian WSL에서 수행하며, 다른 OS의 실행을 보장하지 않는다.
 
 ## 빌드와 실행
 
 Ubuntu WSL2에서 프로젝트 루트로 이동한다.
 
 ~~~sh
-cd /mnt/c/Users/David/SW-AI-W02-03-TEMPLATE/jungle-week-13-c-web-server
+cd "/mnt/c/Users/wotjd/Desktop/정글/week13"
 make all backend
 ~~~
 
-사용자가 옮긴 설정 파일은 build/proxy.conf.example이다. 파일 내용은 아래 형식이다. 빌드와 clean은 이 파일을 덮어쓰거나 삭제하지 않는다. build/는 Git에서 제외되므로 새 체크아웃에서는 설정 파일을 직접 준비해야 한다.
+저장소의 `config/proxy.conf.example`을 사용하거나 같은 형식의 설정을 준비한다. 빌드는 이 설정 파일을 덮어쓰지 않는다.
 
 ~~~text
 submission 127.0.0.1:8001
@@ -32,7 +52,9 @@ query-b 127.0.0.1:8003
 다른 터미널에서 프록시를 실행한다.
 
 ~~~sh
-./build/server 8080 build/proxy.conf.example
+./build/server 8080 config/proxy.conf.example
+# 네트워크 worker 수를 명시할 때 (1~64, 기본 4):
+./build/server 8080 config/proxy.conf.example 4
 ~~~
 
 프록시는 public 디렉터리가 있는 프로젝트 루트에서 실행한다. 시작 로그 없이 기다리며 종료는 Ctrl+C다. 클라이언트 접속 주소·포트는 하나다.

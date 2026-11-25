@@ -23,6 +23,7 @@ struct event_connection *create_event_connection(struct event_worker *worker,
     connection->phase = READ_CLIENT_HEADER;
     connection->heap_index = SIZE_MAX;
     connection->stage_deadline = accepted.accepted_at + HEADER_DEADLINE_SECONDS * 1000;
+    connection->client_idle_deadline = accepted.accepted_at + IO_CALL_TIMEOUT_SECONDS * 1000;
     connection->next = worker->connections;
     if (worker->connections) worker->connections->previous = connection;
     worker->connections = connection;
@@ -106,7 +107,10 @@ void refresh_connection_interest(struct event_connection *connection) {
 int64_t connection_next_deadline(const struct event_connection *connection) {
     if (connection->closing || connection->retired) return -1;
     switch (connection->phase) {
-        case READ_CLIENT_HEADER: case READ_CLIENT_BODY: case CONNECT_BACKEND:
+        case READ_CLIENT_HEADER: case READ_CLIENT_BODY:
+            return connection->stage_deadline < connection->client_idle_deadline
+                ? connection->stage_deadline : connection->client_idle_deadline;
+        case CONNECT_BACKEND:
         case SEND_BACKEND_REQUEST: case READ_BACKEND_HEADER: case DRAIN_CLIENT:
             return connection->stage_deadline;
         case SEND_CONTINUE:
@@ -300,6 +304,7 @@ static int read_client_request_headers(struct event_connection *connection) {
         return 1;
     }
     connection->header_received += (size_t)count;
+    connection->client_idle_deadline = monotonic_milliseconds() + IO_CALL_TIMEOUT_SECONDS * 1000;
     size_t start = previous > 3 ? previous - 3 : 0;
     for (size_t i = start; i + 4 <= connection->header_received; ++i) {
         if (memcmp(connection->request_header + i, "\r\n\r\n", 4) == 0) {
@@ -326,6 +331,7 @@ static int read_client_request_body(struct event_connection *connection) {
     }
     if (count == 0) { prepare_connection_error(connection, 400); return 1; }
     connection->body_received += (size_t)count;
+    connection->client_idle_deadline = monotonic_milliseconds() + IO_CALL_TIMEOUT_SECONDS * 1000;
     return 1;
 }
 
@@ -454,7 +460,10 @@ void advance_connection(struct event_connection *connection) {
                 if (sent < 0) { close_event_connection(connection); break; }
                 progressed = sent != 0;
                 if (sent != 1) break;
-                if (phase == SEND_CONTINUE) connection->phase = READ_CLIENT_BODY;
+                if (phase == SEND_CONTINUE) {
+                    connection->phase = READ_CLIENT_BODY;
+                    connection->client_idle_deadline = monotonic_milliseconds() + IO_CALL_TIMEOUT_SECONDS * 1000;
+                }
                 else if (phase == SEND_CLIENT_BODY && connection->output_is_last)
                     begin_client_drain(connection);
                 else if (phase == SEND_CLIENT_HEADER && connection->head_request)

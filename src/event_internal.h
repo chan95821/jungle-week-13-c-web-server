@@ -107,7 +107,8 @@ struct event_connection {
     bool local_job_inflight, local_cleanup_done;
     atomic_bool cancel_local_job;
     size_t heap_index;
-    int64_t timer_at, stage_deadline, body_deadline, backend_idle_deadline, write_deadline;
+    int64_t timer_at, stage_deadline, body_deadline, client_idle_deadline;
+    int64_t backend_idle_deadline, write_deadline;
 
     /* 파서의 slice는 이 메모리를 빌린다. 함수가 반환되어도 연결과 함께 살아 있다. */
     unsigned char request_header[REQ_HEADER_MAX_BYTES];

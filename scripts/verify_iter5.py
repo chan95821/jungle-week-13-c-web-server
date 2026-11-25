@@ -198,7 +198,13 @@ def main():
         with running_fixture(workers) as fixture:
             tasks = Path(f"/proc/{fixture.proxy.pid}/task")
             if tasks.exists():
-                assert len(list(tasks.iterdir())) == 1 + workers + 2
+                count = len(list(tasks.iterdir()))
+                expected = 1 + workers + 2
+                # TSan 자체도 감시용 스레드를 만든다. 일반 바이너리만 정확한 개수를 요구한다.
+                if regression.SERVER.name.endswith(("-asan", "-tsan")):
+                    assert count >= expected
+                else:
+                    assert count == expected, (count, expected)
             check_slow_client_upload(fixture)
             check_global_query_sequence(fixture)
             check_waiting_backend_isolation(fixture)
