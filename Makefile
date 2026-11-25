@@ -10,6 +10,7 @@ BACKEND_TARGET = $(BUILD_DIR)/test_backend
 CGI_DIR = cgi-bin
 CGI_BINS = $(CGI_DIR)/order
 TEST_NAMES = test_parse_port test_recv_header test_send_all test_http_parser test_body_send test_proxy_selection test_proxy_protocol test_proxy_lifecycle
+TEST_NAMES += test_event_io
 TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
 HANDLER_SRCS = src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c
@@ -22,6 +23,7 @@ HEADERS = src/server.h src/socket_io.h src/http.h src/router.h src/proxy.h src/p
 TEST_SRCS = src/server.c src/socket_io.c src/http.c src/router.c $(PROXY_SRCS) $(HANDLER_SRCS)
 
 .PHONY: all test verify verify-edge clean server cgi backend $(TEST_NAMES)
+.PHONY: verify-b server-asan server-tsan
 
 all: $(TARGET) $(CGI_BINS)
 
@@ -82,3 +84,18 @@ $(BUILD_DIR)/test-obj/%.o: src/%.c $(HEADERS)
 
 $(BUILD_DIR)/test_proxy_lifecycle: tests/unit/test_proxy_lifecycle.c $(TEST_SRCS) $(HEADERS) $(LIFECYCLE_TEST_OBJS) | $(BUILD_DIR)
 	$(CC) $(ASAN_FLAGS) -o $@ $< $(filter-out $(PROXY_SRCS),$(TEST_SRCS)) $(LIFECYCLE_TEST_OBJS)
+
+$(BUILD_DIR)/test_event_io: tests/unit/test_event_io.c $(TEST_SRCS) $(EVENT_SRCS) $(HEADERS) | $(BUILD_DIR)
+	$(CC) $(ASAN_FLAGS) $(THREAD_FLAGS) -o $@ $< $(TEST_SRCS) $(EVENT_SRCS)
+
+# Compile targets only: neither sanitizer nor E2E runs implicitly in these targets.
+server-asan: $(BUILD_DIR)/server-asan
+$(BUILD_DIR)/server-asan: $(SRCS) $(HEADERS) | $(BUILD_DIR)
+	$(CC) $(ASAN_FLAGS) -fno-omit-frame-pointer $(THREAD_FLAGS) -o $@ $(SRCS)
+
+server-tsan: $(BUILD_DIR)/server-tsan
+$(BUILD_DIR)/server-tsan: $(SRCS) $(HEADERS) | $(BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=thread -fno-omit-frame-pointer $(THREAD_FLAGS) -o $@ $(SRCS)
+
+verify-b: $(TARGET) $(CGI_BINS) $(BACKEND_TARGET)
+	python3 scripts/verify_iter5.py

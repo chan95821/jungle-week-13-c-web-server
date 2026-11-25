@@ -169,13 +169,22 @@ static int reap_cgi_child(struct cgi_body *cgi, bool force_terminate) {
 
     int wstatus = 0;
     if (!force_terminate) {
-        pid_t res;
-        do {
-            res = waitpid(cgi->pid, &wstatus, 0);
-        } while (res < 0 && errno == EINTR);
-        if (res < 0) return -1;
-        cgi->reaped = true;
-        return wstatus;
+        /* stdout을 닫고 종료하지 않는 CGI도 있다. 보조 풀 전체가 영구 대기하지 않게 한다. */
+        struct timespec deadline;
+        if (!make_deadline(&deadline, CGI_READ_TIMEOUT_MS)) return -1;
+        for (;;) {
+            pid_t res = waitpid(cgi->pid, &wstatus, WNOHANG);
+            if (res > 0) { cgi->reaped = true; return wstatus; }
+            if (res < 0 && errno != EINTR) return -1;
+            struct timespec now;
+            if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
+            if (now.tv_sec > deadline.tv_sec ||
+                (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+                errno = ETIMEDOUT; return -1;
+            }
+            struct timespec pause_ts = {.tv_sec = 0, .tv_nsec = 10000000L};
+            nanosleep(&pause_ts, NULL);
+        }
     }
 
     pid_t res = waitpid(cgi->pid, &wstatus, WNOHANG);
@@ -414,7 +423,10 @@ static int spawn_cgi_process(const char *resolved, const char *script_name,
     free(exec_arg); free(env_method); free(env_query);
     free(env_script); free(env_proto); free(env_path);
 
-    if (spawn_error) { close(pipefd[0]); errno = spawn_error; return 500; }
+    if (spawn_error) {
+        close(pipefd[0]); errno = spawn_error;
+        return spawn_error == ENOENT || spawn_error == EACCES || spawn_error == ENOEXEC ? 502 : 500;
+    }
     *pid_out = pid;
     *fd_out = pipefd[0];
     return 0;

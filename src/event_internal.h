@@ -105,6 +105,7 @@ struct event_connection {
     enum connection_phase phase;
     bool ready_queued, retired, response_started, head_request, closing;
     bool local_job_inflight, local_cleanup_done;
+    atomic_bool cancel_local_job;
     size_t heap_index;
     int64_t timer_at, stage_deadline, body_deadline, backend_idle_deadline, write_deadline;
 

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>정글 카페</title>
+  <link rel="stylesheet" href="/assets/cafe.css">
+  <script src="/assets/cafe.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">JUNGLE CAFE</p>
+    <h1>잠시 쉬어가는 곳</h1>
+    <p>따뜻한 커피 한 잔과 함께 여유로운 시간을 보내세요.</p>
+    <form class="demo-form" action="/greet" method="get" data-async-target="greet-result">
+      <label for="visitor-name">이름</label>
+      <input id="visitor-name" name="name" type="text" placeholder="예: Alice">
+      <button type="submit">인사 받기</button>
+    </form>
+    <div id="greet-result" aria-live="polite"></div>
+    <p class="nav-links"><a href="/menu">메뉴 보기 →</a></p>
+  </main>
+</body>
+</html>

@@ -29,7 +29,10 @@ static void *run_local_work_loop(void *argument) {
 
         errno = 0;
         job->chunk = (struct http_slice){0};
-        if (job->kind == PREPARE_LOCAL_RESPONSE)
+        if (job->kind != CLEANUP_LOCAL_RESPONSE && atomic_load(&connection->cancel_local_job)) {
+            job->result = BODY_ERROR;
+            errno = ECANCELED;
+        } else if (job->kind == PREPARE_LOCAL_RESPONSE)
             connection->route.local_handler(&connection->request, &connection->response);
         else if (job->kind == READ_LOCAL_BODY)
             job->result = connection->response.body_provider.next_func(

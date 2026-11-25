@@ -17,6 +17,7 @@ struct event_connection *create_event_connection(struct event_worker *worker,
     struct event_connection *connection = calloc(1, sizeof(*connection));
     if (!connection) return NULL;
     connection->worker = worker;
+    atomic_init(&connection->cancel_local_job, false);
     connection->client = (struct event_endpoint){connection, accepted.fd, 0, false};
     connection->backend = (struct event_endpoint){connection, -1, 0, true};
     connection->phase = READ_CLIENT_HEADER;
@@ -42,6 +43,7 @@ void detach_endpoint(struct event_connection *connection, struct event_endpoint 
 void close_event_connection(struct event_connection *connection) {
     if (connection->retired) return;
     connection->closing = true;
+    atomic_store(&connection->cancel_local_job, true);
     forget_connection_timer(connection);
     detach_endpoint(connection, &connection->client);
     detach_endpoint(connection, &connection->backend);

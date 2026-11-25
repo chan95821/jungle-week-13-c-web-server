@@ -59,7 +59,7 @@ void fail_backend_connection(struct event_connection *connection, int error) {
     prepare_connection_error(connection, error == ENOMEM ? 500 : error == ETIMEDOUT ? 504 : 502);
 }
 
-/* 1=data, 0=EAGAIN, 2=EOF, -1=error. 既存 blocking helperとは結果契約が異なる。 */
+/* 1=data, 0=EAGAIN, 2=EOF, -1=error. 기존 blocking helper와 결과 계약이 다르다. */
 static int receive_backend_bytes(struct event_connection *connection) {
     struct proxy_stream *stream = connection->stream;
     if (stream->buffer_offset < stream->buffer_length) return 1;
@@ -77,6 +77,9 @@ static int receive_backend_bytes(struct event_connection *connection) {
 }
 
 static int read_backend_response_headers(struct event_connection *connection) {
+    if (connection->backend_headers->raw_header_length == REQ_HEADER_MAX_BYTES) {
+        errno = EPROTO; return -1;
+    }
     int available = receive_backend_bytes(connection);
     if (available == 2) { errno = EPROTO; return -1; }
     if (available != 1) return available == 3 ? 1 : available;
@@ -112,6 +115,7 @@ static int read_backend_chunk_line(struct event_connection *connection) {
         connection->chunk_line = malloc(REQ_HEADER_MAX_BYTES);
         if (!connection->chunk_line) return -1;
     }
+    if (connection->chunk_line_length == REQ_HEADER_MAX_BYTES) { errno = EPROTO; return -1; }
     struct proxy_stream *stream = connection->stream;
     int available = receive_backend_bytes(connection);
     if (available == 2) { errno = EPROTO; return -1; }
