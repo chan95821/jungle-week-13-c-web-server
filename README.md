@@ -62,11 +62,16 @@ flowchart TD
 ## 3. 카페 데모
 
 - **정적 페이지**: `/cafe` 호출 → HTML·CSS·JavaScript 서빙.
-![카페 페이지와 정적 파일 서빙](docs\assets\static.png)
+
+![카페 페이지와 정적 파일 서빙](docs/assets/static.png)
+
 - **동적 응답**: 이름 `Alice` 입력 → ‘인사 받기’ → `/greet` 응답 반영.
-![카페 페이지와 동적 인사 응답](docs\assets\Alice.png)
+
+![카페 페이지와 동적 인사 응답](docs/assets/Alice.png)
+
 - **프록시 중계**: 조회 API 두 번 호출 → RR 설정에서 `X-Backend-ID`로 조회 A/B 분산 확인.
-![조회 백엔드 A/B 분산](docs\assets\proxy2.png)
+
+![조회 백엔드 A/B 분산](docs/assets/proxy2.png)
 
 ## 4. 동시성 설계와 모델 비교
 
