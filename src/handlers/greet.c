@@ -223,7 +223,9 @@ static bool build_greet_html(struct http_slice display_name,
 
 /* Extract and validate query "name" (fallback "손님"), then prepare owned HTML response. */
 void prepare_greet(const struct http_request *request,
+                   const struct cancel_signal *cancel,
                    struct router_response *response) {
+    (void)cancel;
     bool found = false;
     unsigned char *name_buf = NULL;
     size_t name_len = 0;

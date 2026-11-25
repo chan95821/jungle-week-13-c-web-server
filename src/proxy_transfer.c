@@ -8,12 +8,12 @@
 /* Prepare locally, then transfer backend/buffer ownership to the provider. */
 void proxy_prepare_response(const struct sockaddr_in *backend,
                             const struct http_request *request,
-                            const volatile sig_atomic_t *running,
+                            const struct cancel_signal *cancel,
                             struct router_response *response) {
     struct proxy_stream *stream = calloc(1, sizeof(*stream));
     if (!stream) { router_prepare_error(response, 500, NULL); return; }
     stream->backend_fd = -1;
-    stream->running = running;
+    stream->cancel = cancel;
     if (connect_backend(stream, backend) < 0 ||
         forward_request_to_backend(stream, backend, request) < 0 ||
         make_deadline(&stream->header_deadline, PROXY_HEADER_SECONDS) < 0 ||

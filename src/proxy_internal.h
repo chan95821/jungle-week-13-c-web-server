@@ -11,7 +11,7 @@ enum { PROXY_OUTPUT_HEADER_BYTES = 2 * REQ_HEADER_MAX_BYTES + 256 };
 /* Owns backend_fd and optional heap blocks; never borrows header workspace slices. */
 struct proxy_stream {
     int backend_fd;
-    const volatile sig_atomic_t *running;
+    const struct cancel_signal *cancel;
     struct timespec header_deadline, body_deadline;
     bool body_started;
     unsigned char buffer[PROXY_STREAM_BYTES];

@@ -17,7 +17,7 @@ enum body_result read_backend_body_chunk(void *state, struct http_slice *chunk) 
     stream->client_header_length = 0;
     if (stream->body_complete || stream->framing == BACKEND_NO_BODY ||
         (stream->framing == BACKEND_LENGTH && stream->remaining == 0)) return BODY_END;
-    if (stream->running && !*stream->running) { errno = ECANCELED; return BODY_ERROR; }
+    if (!cancel_signal_is_running(stream->cancel)) { errno = ECANCELED; return BODY_ERROR; }
     if (deadline_reached(&stream->body_deadline)) { errno = ETIMEDOUT; return BODY_ERROR; }
 
     if (stream->framing == BACKEND_CHUNKED && stream->chunk_remaining == 0) {

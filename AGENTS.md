@@ -42,6 +42,9 @@
 3. **단일 책임 및 Clean Code**
    - 연결 조율(`handle_client`)과 수신 프레이밍(`recv_until_header_end`), 완전 송신(`send_all`)처럼 역할이 다른 로직은 작은 함수로 분리합니다.
    - 모든 정상·오류 경로에서 FD 정리 지점을 명확히 유지하고, 엣지 케이스는 원리(미수신/조기 EOF, 분할·동반 도착, 형식 위반, 버퍼 상한) 기준으로 도출합니다.
+4. **취소 신호(`cancel_signal`)와 I/O 정책(`io_context`) 전달 경계**
+   - 모듈 간 공개 경계 및 요청·스트림 전체 수명(`handle_client`, `router_handler`/`prepare_cgi`, `proxy_prepare_response`, `struct proxy_stream`)은 단계별 `deadline`과 무관하게 유지되는 `const struct cancel_signal *`만 전달하고 `cancel_signal_is_running()`으로 종료 여부를 확인합니다.
+   - 실제 소켓 `recv`/`send` 루프를 실행하는 저수준 I/O 경계(`receive_with_deadline`, `send_all_with_deadline` 및 이를 직접 감싸는 내부 I/O 헬퍼)에서만 `{ cancel, deadline }`을 묶은 `const struct io_context *`를 사용하고 `server_is_running()`으로 확인합니다(`deadline == NULL`이면 호출 타임아웃만 적용).
 
 ## Iteration 개발·검증 워크플로우
 

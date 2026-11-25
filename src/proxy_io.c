@@ -19,17 +19,29 @@ int connect_backend(struct proxy_stream *stream, const struct sockaddr_in *backe
     if (connect(fd, (const struct sockaddr *)backend, sizeof(*backend)) < 0) {
         if (errno != EINPROGRESS && errno != EINTR) return -1;
         for (;;) {
-            if (stream->running && !*stream->running) { errno = ECANCELED; return -1; }
+            if (!cancel_signal_is_running(stream->cancel)) {
+                errno = ECANCELED;
+                return -1;
+            }
             struct timespec now;
             if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
             long long milliseconds = (deadline.tv_sec - now.tv_sec) * 1000LL +
                 (deadline.tv_nsec - now.tv_nsec + 999999LL) / 1000000LL;
             if (milliseconds <= 0) { errno = ETIMEDOUT; return -1; }
-            struct pollfd ready = {.fd = fd, .events = POLLOUT};
-            int result = poll(&ready, 1, (int)milliseconds);
+            int stop_fd = stream->cancel ? stream->cancel->stop_fd : -1;
+            struct pollfd ready[2] = {
+                {.fd = fd, .events = POLLOUT},
+                {.fd = stop_fd, .events = POLLIN}
+            };
+            nfds_t count = stop_fd >= 0 ? 2 : 1;
+            int result = poll(ready, count, (int)milliseconds);
             if (result < 0 && errno == EINTR) continue;
             if (result < 0) return -1;
             if (result == 0) { errno = ETIMEDOUT; return -1; }
+            if (count == 2 && (ready[1].revents & (POLLIN | POLLERR | POLLHUP))) {
+                errno = ECANCELED;
+                return -1;
+            }
             int error = 0;
             socklen_t length = sizeof(error);
             if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) < 0) return -1;
@@ -38,7 +50,8 @@ int connect_backend(struct proxy_stream *stream, const struct sockaddr_in *backe
         }
     }
     if (deadline_reached(&deadline)) { errno = ETIMEDOUT; return -1; }
-    return fcntl(fd, F_SETFL, flags);
+    if (fcntl(fd, F_SETFL, flags) < 0) return -1;
+    return socket_configure_timeouts(fd);
 }
 
 int make_deadline(struct timespec *deadline, int seconds) {
@@ -64,7 +77,7 @@ int fill_backend_buffer(struct proxy_stream *stream) {
              stream->body_deadline.tv_nsec < deadline.tv_nsec))
             deadline = stream->body_deadline;
     }
-    struct io_context input = {stream->running, &deadline};
+    struct io_context input = {stream->cancel, &deadline};
     ssize_t count = receive_with_deadline(stream->backend_fd, stream->buffer,
                                           sizeof(stream->buffer), &input);
     if (count < 0) {

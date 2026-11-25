@@ -3,7 +3,8 @@
 
 #include "http.h"
 #include "router.h"
-#include <signal.h>
+#include "socket_io.h"
+#include <pthread.h>
 #include <netinet/in.h>
 
 /* Caller-owned immutable configuration; no allocations or open FDs inside. */
@@ -12,10 +13,18 @@ struct proxy_config {
     struct sockaddr_in query_backends[2];
 };
 
-/* Caller-owned state. Both query routes share one sequence, initially zero. */
+/* Caller-owned state initialized via proxy_selection_init().
+ * Both query routes share one mutex-protected round-robin sequence. */
 struct proxy_selection_state {
+    pthread_mutex_t lock;
     size_t next_query_backend;
 };
+
+/* Initialize query selection state and its mutex. Return 0, or -1 with errno. */
+int proxy_selection_init(struct proxy_selection_state *selection);
+
+/* Destroy query selection state's mutex. Safe no-op when selection is NULL. */
+void proxy_selection_destroy(struct proxy_selection_state *selection);
 
 /* Read all three roles from a file. On failure, preserve config and set errno. */
 int proxy_load_config(const char *path, struct proxy_config *config);
@@ -25,8 +34,9 @@ int proxy_load_config(const char *path, struct proxy_config *config);
 int proxy_validate_request(const struct http_request *request);
 
 /* Borrow an endpoint from config; NULL for LOCAL/invalid route.
- * Advance QUERY's turn immediately, independently of subsequent connection success.
- * This sequential state is not safe for concurrent worker access without a policy. */
+ * selection must be initialized with proxy_selection_init().
+ * For PROXY_ROUTE_QUERY, synchronize round-robin selection using selection->lock
+ * and advance the turn immediately, independently of subsequent connection success. */
 const struct sockaddr_in *proxy_select_backend(
     const struct proxy_config *config, struct proxy_selection_state *selection,
     enum proxy_route route);
@@ -44,7 +54,7 @@ enum {
  * wire_header must be sent before the first next_func call, which releases it. */
 void proxy_prepare_response(const struct sockaddr_in *backend,
                             const struct http_request *request,
-                            const volatile sig_atomic_t *running,
+                            const struct cancel_signal *cancel,
                             struct router_response *response);
 
 #endif

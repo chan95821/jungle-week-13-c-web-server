@@ -3,6 +3,8 @@
 
 #include "http.h"
 
+struct cancel_signal;
+
 enum body_result { BODY_DATA, BODY_END, BODY_ERROR };
 
 struct body_provider {
@@ -28,6 +30,7 @@ struct router_response {
 
 /* Prepare in caller-owned storage so the provider's state remains valid. */
 typedef void (*router_handler)(const struct http_request *request,
+                               const struct cancel_signal *cancel,
                                struct router_response *response);
 
 /* Routing owns endpoint roles; proxy selection owns concrete backend addresses. */

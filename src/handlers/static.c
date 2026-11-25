@@ -109,21 +109,27 @@ fail:
 
 /* Serve fixed demo page public/pages/cafe.html for GET /cafe. */
 void prepare_cafe(const struct http_request *request,
+                  const struct cancel_signal *cancel,
                   struct router_response *response) {
     (void)request;
+    (void)cancel;
     prepare_file("public/pages/cafe.html", "public", response);
 }
 
 /* Serve fixed demo page public/pages/menu.html for GET /menu. */
 void prepare_menu(const struct http_request *request,
+                  const struct cancel_signal *cancel,
                   struct router_response *response) {
     (void)request;
+    (void)cancel;
     prepare_file("public/pages/menu.html", "public", response);
 }
 
 /* Reject '%' in path with 400; otherwise resolve under public/assets. */
 void prepare_assets(const struct http_request *request,
+                    const struct cancel_signal *cancel,
                     struct router_response *response) {
+    (void)cancel;
     if (memchr(request->path.data, '%', request->path.length)) {
         router_prepare_error(response, 400, NULL);
         return;

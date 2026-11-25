@@ -1,5 +1,6 @@
 #define _XOPEN_SOURCE 700
 #include "handlers.h"
+#include "../socket_io.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -23,6 +24,7 @@ struct cgi_body {
     pid_t pid;
     bool reaped;
     bool eof_reached;
+    const struct cancel_signal *cancel;
     char *content_type;
     size_t initial_pos;
     size_t initial_len;
@@ -41,9 +43,18 @@ static bool make_deadline(struct timespec *deadline, int timeout_ms) {
     return true;
 }
 
-/* Wait via poll() until fd is readable or deadline expires. Return 0 or -1 (ETIMEDOUT). */
-static int wait_readable(int fd, const struct timespec *deadline) {
+/* Wait via poll() until fd is readable, canceled, or deadline expires. Return 0 or -1. */
+static int wait_readable(int fd, const struct timespec *deadline,
+                         const struct cancel_signal *cancel) {
+    int stop_fd = cancel ? cancel->stop_fd : -1;
+    nfds_t nfds = stop_fd >= 0 ? 2 : 1;
+
     for (;;) {
+        if (!cancel_signal_is_running(cancel)) {
+            errno = ECANCELED;
+            return -1;
+        }
+
         struct timespec now;
         if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
         long sec = (long)(deadline->tv_sec - now.tv_sec);
@@ -54,10 +65,18 @@ static int wait_readable(int fd, const struct timespec *deadline) {
             return -1;
         }
         int timeout = remaining_ms > INT32_MAX ? INT32_MAX : (int)remaining_ms;
-        struct pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
-        int ready = poll(&pfd, 1, timeout);
+        struct pollfd pfds[2] = {
+            {.fd = fd, .events = POLLIN, .revents = 0},
+            {.fd = stop_fd, .events = POLLIN, .revents = 0}
+        };
+        int ready = poll(pfds, nfds, timeout);
         if (ready < 0) {
             if (errno == EINTR) continue;
+            return -1;
+        }
+        if ((nfds == 2 && (pfds[1].revents & (POLLIN | POLLERR | POLLHUP))) ||
+            !cancel_signal_is_running(cancel)) {
+            errno = ECANCELED;
             return -1;
         }
         if (ready == 0) {
@@ -217,12 +236,16 @@ static enum body_result cgi_body_next(void *state, struct http_slice *chunk) {
 
     struct timespec deadline;
     if (!make_deadline(&deadline, CGI_READ_TIMEOUT_MS)) return BODY_ERROR;
-    if (wait_readable(cgi->fd, &deadline) < 0) return BODY_ERROR;
+    if (wait_readable(cgi->fd, &deadline, cgi->cancel) < 0) return BODY_ERROR;
 
     ssize_t count;
     do {
         count = read(cgi->fd, cgi->buffer, sizeof(cgi->buffer));
-    } while (count < 0 && errno == EINTR);
+    } while (count < 0 && errno == EINTR && cancel_signal_is_running(cgi->cancel));
+    if (!cancel_signal_is_running(cgi->cancel)) {
+        errno = ECANCELED;
+        return BODY_ERROR;
+    }
     if (count < 0) return BODY_ERROR;
     if (count > 0) {
         *chunk = (struct http_slice){cgi->buffer, (size_t)count};
@@ -362,6 +385,14 @@ static int spawn_cgi_process(const char *resolved, const char *script_name,
         return 500;
     }
 
+    if (set_close_on_exec(pipefd[0]) < 0 || set_close_on_exec(pipefd[1]) < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        free(exec_arg); free(env_method); free(env_query);
+        free(env_script); free(env_proto); free(env_path);
+        return 500;
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         close(pipefd[0]);
@@ -423,20 +454,26 @@ static int read_cgi_header(struct cgi_body *cgi, int *status_out) {
         }
 
         if (used == sizeof(raw)) return 502;
-        if (wait_readable(cgi->fd, &deadline) < 0) return 502;
+        if (wait_readable(cgi->fd, &deadline, cgi->cancel) < 0) return 502;
 
         ssize_t count;
         do {
             count = read(cgi->fd, raw + used, sizeof(raw) - used);
-        } while (count < 0 && errno == EINTR);
-        if (count <= 0) return 502;
+        } while (count < 0 && errno == EINTR && cancel_signal_is_running(cgi->cancel));
+        if (!cancel_signal_is_running(cgi->cancel) || count <= 0) return 502;
         used += (size_t)count;
     }
 }
 
 /* Execute CGI script under /cgi-bin/ and prepare chunked response (500 on OS fail, 502 on CGI fail). */
 void prepare_cgi(const struct http_request *request,
+                 const struct cancel_signal *cancel,
                  struct router_response *response) {
+    if (!cancel_signal_is_running(cancel)) {
+        router_prepare_error(response, 502, NULL);
+        return;
+    }
+
     char *resolved = NULL, *script_name = NULL;
     int err = resolve_cgi_script(request->path, &resolved, &script_name);
     if (err != 0) {
@@ -453,6 +490,7 @@ void prepare_cgi(const struct http_request *request,
     }
     cgi->fd = -1;
     cgi->pid = -1;
+    cgi->cancel = cancel;
 
     err = spawn_cgi_process(resolved, script_name, request->query, &cgi->pid, &cgi->fd);
     free(resolved);

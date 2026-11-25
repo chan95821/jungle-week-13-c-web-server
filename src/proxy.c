@@ -60,14 +60,44 @@ cleanup:
     return 0;
 }
 
+/* Initialize query round-robin state and its synchronization mutex. */
+int proxy_selection_init(struct proxy_selection_state *selection) {
+    if (!selection) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    selection->next_query_backend = 0;
+
+    int rc = pthread_mutex_init(&selection->lock, NULL);
+    if (rc != 0) {
+        errno = rc;
+        return -1;
+    }
+
+    return 0;
+}
+
+/* Release the mutex held by selection. Safe no-op if selection is NULL. */
+void proxy_selection_destroy(struct proxy_selection_state *selection) {
+    if (!selection) return;
+
+    pthread_mutex_destroy(&selection->lock);
+}
+
+/* Select backend for route; synchronize only PROXY_ROUTE_QUERY turn updates. */
 const struct sockaddr_in *proxy_select_backend(
     const struct proxy_config *config, struct proxy_selection_state *selection,
     enum proxy_route route) {
+    if (!config) return NULL;
     if (route == PROXY_ROUTE_SUBMISSIONS) return &config->submission_backend;
-    if (route != PROXY_ROUTE_QUERY) return NULL;
+    if (route != PROXY_ROUTE_QUERY || !selection) return NULL;
 
+    pthread_mutex_lock(&selection->lock);
     size_t selected_index = selection->next_query_backend % 2;
     selection->next_query_backend = (selected_index + 1) % 2;
+    pthread_mutex_unlock(&selection->lock);
+
     return &config->query_backends[selected_index];
 }
 

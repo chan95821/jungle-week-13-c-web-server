@@ -50,10 +50,13 @@ int forward_request_to_backend(struct proxy_stream *stream,
     }
     if (append_format(header, sizeof(header), &used,
                       "Connection: close\r\nVia: 1.1 jungle-proxy\r\n\r\n") < 0) return -1;
-    struct io_context output = {stream->running, &deadline};
-    if (send_all_with_deadline(stream->backend_fd, header, used, &output) < 0 ||
-        send_all_with_deadline(stream->backend_fd, request->body.data,
-                               request->body.length, &output) < 0) {
+    struct io_context output = {stream->cancel, &deadline};
+    struct iovec request_iov[2] = {
+        {.iov_base = header, .iov_len = used},
+        {.iov_base = (void *)request->body.data, .iov_len = request->body.length}
+    };
+    int vector_count = request->body.length ? 2 : 1;
+    if (send_allv_with_deadline(stream->backend_fd, request_iov, vector_count, &output) < 0) {
         if (socket_io_timed_out()) errno = ETIMEDOUT;
         return -1;
     }

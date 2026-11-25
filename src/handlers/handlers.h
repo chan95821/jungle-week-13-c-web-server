@@ -5,18 +5,25 @@
 
 /* Route preparation handlers registered in routes[] (src/router.c). */
 void prepare_hello(const struct http_request *request,
+                   const struct cancel_signal *cancel,
                    struct router_response *response);
 void prepare_echo(const struct http_request *request,
+                  const struct cancel_signal *cancel,
                   struct router_response *response);
 void prepare_cafe(const struct http_request *request,
+                  const struct cancel_signal *cancel,
                   struct router_response *response);
 void prepare_menu(const struct http_request *request,
+                  const struct cancel_signal *cancel,
                   struct router_response *response);
 void prepare_assets(const struct http_request *request,
+                    const struct cancel_signal *cancel,
                     struct router_response *response);
 void prepare_greet(const struct http_request *request,
+                   const struct cancel_signal *cancel,
                    struct router_response *response);
 void prepare_cgi(const struct http_request *request,
+                 const struct cancel_signal *cancel,
                  struct router_response *response);
 
 /* Shared helpers defined in src/router.c. */

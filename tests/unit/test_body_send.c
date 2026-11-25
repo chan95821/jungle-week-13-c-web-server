@@ -4,6 +4,7 @@
 #include "../../src/server.c"
 
 #include <assert.h>
+#include <signal.h>
 
 struct test_body {
     enum body_result result;
@@ -323,12 +324,50 @@ static void test_chunked_streaming_and_failures(void) {
     }
 }
 
+static void test_chunked_trailers(void) {
+    int sv[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+
+    static const char trailer_wire[] = "X-Check: done\r\n";
+    struct http_slice trailers = {(const unsigned char *)trailer_wire, sizeof(trailer_wire) - 1};
+    struct chunked_multi_body multi = {.pieces = {"ab", "cde"}};
+    struct router_response resp = {
+        .status = 200,
+        .content_type = "text/plain",
+        .chunked = true,
+        .body_provider = {
+            .next_func = chunked_multi_next,
+            .cleanup_func = chunked_multi_cleanup,
+            .state = &multi,
+            .trailers = &trailers
+        }
+    };
+    assert(send_prepared_response(sv[0], &resp, false, NULL) == 0);
+    assert(multi.cleanups == 1);
+    assert(shutdown(sv[0], SHUT_WR) == 0);
+
+    char wire[512];
+    size_t used = 0;
+    ssize_t n;
+    while ((n = recv(sv[1], wire + used, sizeof(wire) - 1 - used, 0)) > 0)
+        used += (size_t)n;
+    assert(n == 0);
+    wire[used] = '\0';
+
+    const char *body_start = strstr(wire, "\r\n\r\n");
+    assert(body_start != NULL);
+    assert(strcmp(body_start + 4, "2\r\nab\r\n3\r\ncde\r\n0\r\nX-Check: done\r\n\r\n") == 0);
+    close(sv[0]);
+    close(sv[1]);
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
     test_provider_failures();
     test_length_and_send_failure();
     test_response_cleanup();
     test_chunked_streaming_and_failures();
+    test_chunked_trailers();
     puts("[PASS] test_body_send");
     return 0;
 }

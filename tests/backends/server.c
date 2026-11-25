@@ -12,7 +12,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-static volatile sig_atomic_t backend_running = 1;
+static atomic_int backend_running = 1;
 static void stop_backend(int signal_number) { (void)signal_number; backend_running = 0; }
 static void handle_backend_request(int, const char *, const char *);
 static void pause_backend(int);
@@ -59,7 +59,8 @@ static void handle_backend_request(int client, const char *identity, const char 
     if (set_close_on_exec(client) < 0 ||
         clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) return;
     deadline.tv_sec += 15; /* Test fixture request deadline; no response lifetime cap. */
-    struct io_context io = {&backend_running, &deadline};
+    struct cancel_signal cancel = {.running = &backend_running, .stop_fd = -1};
+    struct io_context io = {.cancel = &cancel, .deadline = &deadline};
     while (received < sizeof(header) && !header_end) {
         ssize_t count = receive_with_deadline(client, header + received,
                                                sizeof(header) - received, &io);

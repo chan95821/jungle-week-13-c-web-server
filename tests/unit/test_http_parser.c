@@ -124,18 +124,18 @@ static void response_selection(void) {
     const char *allow;
     struct router_response response;
     assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
-    route_handler_func(&request, &response);
+    route_handler_func(&request, NULL, &response);
     assert(response.status == 200 && response.allow == NULL);
     assert(strcmp(response.content_type, "application/octet-stream") == 0);
     assert(response.body == bytes && response.length == sizeof(bytes));
 
     request.body = (struct http_slice){NULL, 0};
-    route_handler_func(&request, &response);
+    route_handler_func(&request, NULL, &response);
     assert(response.body == NULL && response.length == 0);
     request.method = (struct http_slice){(const unsigned char *)"GET", 3};
     request.path = (struct http_slice){(const unsigned char *)"/hello", 6};
     assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
-    route_handler_func(&request, &response);
+    route_handler_func(&request, NULL, &response);
     assert(strcmp(response.content_type, "text/plain") == 0);
     assert(response.length == 5 && memcmp(response.body, "Hello", 5) == 0);
     router_prepare_error(&response, 405, "GET");
@@ -226,7 +226,7 @@ static void static_file_responses(void) {
         const char *allow = NULL;
         assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
         struct router_response response;
-        route_handler_func(&request, &response);
+        route_handler_func(&request, NULL, &response);
         assert(response.status == 200);
         assert(strcmp(response.content_type, files[i].type) == 0);
         assert(response.length == sizeof(binary));
@@ -272,7 +272,7 @@ static void static_file_responses(void) {
         struct router_response response;
         /* A regression that blocks while opening a FIFO must fail, not hang. */
         alarm(5);
-        route_handler_func(&request, &response);
+        route_handler_func(&request, NULL, &response);
         alarm(0);
         assert(response.status == boundaries[i].status);
         if (response.status == 200) {
@@ -305,13 +305,13 @@ static void static_file_responses(void) {
             const char *allow = NULL;
             struct router_response response;
             assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
-            route_handler_func(&request, &response);
+            route_handler_func(&request, NULL, &response);
             assert(response.status == 200);
             if (response.body_provider.cleanup_func)
                 response.body_provider.cleanup_func(response.body_provider.state);
             request = route_input("GET", "/assets/dir.css");
             assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
-            route_handler_func(&request, &response);
+            route_handler_func(&request, NULL, &response);
             assert(response.status == 404);
             if (response.body_provider.cleanup_func)
                 response.body_provider.cleanup_func(response.body_provider.state);
@@ -353,7 +353,7 @@ static void file_provider_chunks_and_early_eof(void) {
     const char *allow = NULL;
     assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
     struct router_response response;
-    route_handler_func(&request, &response);
+    route_handler_func(&request, NULL, &response);
     assert(response.status == 200 && response.length == sizeof(bytes));
     assert(response.body_provider.next_func);
     size_t offset = 0;
@@ -369,7 +369,7 @@ static void file_provider_chunks_and_early_eof(void) {
 
     /* File shrinks after its length was prepared: provider reports early EOF.
      * This tests the real provider, not the server's response-abort policy. */
-    route_handler_func(&request, &response);
+    route_handler_func(&request, NULL, &response);
     assert(response.status == 200 && response.length == sizeof(bytes));
     assert(truncate(TEST_STATIC_ROOT "/assets/chunks.js", 0) == 0);
     assert(response.body_provider.next_func(response.body_provider.state, &part) == BODY_END);
@@ -390,7 +390,7 @@ static void memory_provider_contract(void) {
     const char *allow = NULL;
     assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
     struct router_response response;
-    route_handler_func(&request, &response);
+    route_handler_func(&request, NULL, &response);
     assert(response.length == sizeof(bytes) && response.body_provider.next_func);
     size_t offset = 0;
     while (offset < sizeof(bytes)) {
@@ -403,7 +403,7 @@ static void memory_provider_contract(void) {
     if (response.body_provider.cleanup_func) response.body_provider.cleanup_func(response.body_provider.state);
 
     request.body = (struct http_slice){NULL, 0};
-    route_handler_func(&request, &response);
+    route_handler_func(&request, NULL, &response);
     assert(response.length == 0 && response.body_provider.next_func);
     if (response.body_provider.cleanup_func) response.body_provider.cleanup_func(response.body_provider.state);
 }
@@ -535,7 +535,7 @@ static void dynamic_greet_responses(void) {
         assert(select_local_handler(&req, &fn, &allow) == 0);
 
         struct router_response resp;
-        fn(&req, &resp);
+        fn(&req, NULL, &resp);
         assert(resp.status == cases[i].status);
         assert(!resp.chunked);
 
@@ -561,7 +561,7 @@ static void dynamic_greet_responses(void) {
     const char *allow = NULL;
     assert(select_local_handler(&invalid_utf8, &fn, &allow) == 0);
     struct router_response resp;
-    fn(&invalid_utf8, &resp);
+    fn(&invalid_utf8, NULL, &resp);
     assert(resp.status == 200);
     unsigned char buf[4096];
     size_t len = 0;
@@ -576,7 +576,7 @@ static void dynamic_greet_responses(void) {
     long_query[sizeof(long_query) - 1] = '\0';
     struct http_request long_req = route_query_input("GET", "/greet", long_query);
     assert(select_local_handler(&long_req, &fn, &allow) == 0);
-    fn(&long_req, &resp);
+    fn(&long_req, NULL, &resp);
     assert(resp.status == 200 && !resp.chunked);
     unsigned char *long_buf = malloc(resp.length + 1);
     assert(long_buf != NULL);
@@ -607,7 +607,7 @@ static void cgi_responses_and_boundaries(void) {
     const char *allow = NULL;
     assert(select_local_handler(&req, &fn, &allow) == 0);
     struct router_response resp;
-    fn(&req, &resp);
+    fn(&req, NULL, &resp);
     assert(resp.status == 404);
     if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
 
@@ -625,7 +625,7 @@ static void cgi_responses_and_boundaries(void) {
     /* Encoded path -> 400 */
     req = route_query_input("GET", "/cgi-bin/%6fk", NULL);
     assert(select_local_handler(&req, &fn, &allow) == 0);
-    fn(&req, &resp);
+    fn(&req, NULL, &resp);
     assert(resp.status == 400);
     if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
 
@@ -638,7 +638,7 @@ static void cgi_responses_and_boundaries(void) {
     for (size_t i = 0; i < sizeof(reject404) / sizeof(reject404[0]); ++i) {
         req = route_query_input("GET", reject404[i], NULL);
         assert(select_local_handler(&req, &fn, &allow) == 0);
-        fn(&req, &resp);
+        fn(&req, NULL, &resp);
         assert(resp.status == 404);
         if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
     }
@@ -653,7 +653,7 @@ static void cgi_responses_and_boundaries(void) {
 
     req = route_query_input("GET", "/cgi-bin/ok.sh", "a=1&b=%20");
     assert(select_local_handler(&req, &fn, &allow) == 0);
-    fn(&req, &resp);
+    fn(&req, NULL, &resp);
     assert(resp.status == 200 && resp.chunked);
     assert(strcmp(resp.content_type, "text/plain") == 0);
 
@@ -669,7 +669,7 @@ static void cgi_responses_and_boundaries(void) {
                 "printf 'Status: 400 Bad Request\\r\\nContent-Type: text/html; charset=utf-8\\r\\n\\r\\nbad'\n",
                 0700);
     req = route_query_input("GET", "/cgi-bin/status400.sh", NULL);
-    fn(&req, &resp);
+    fn(&req, NULL, &resp);
     assert(resp.status == 400 && resp.chunked);
     assert(strcmp(resp.content_type, "text/html; charset=utf-8") == 0);
     drain_provider(&resp, cgi_out, sizeof(cgi_out), &cgi_len);
@@ -692,7 +692,7 @@ static void cgi_responses_and_boundaries(void) {
     };
     for (size_t i = 0; i < sizeof(bad_cgis) / sizeof(bad_cgis[0]); ++i) {
         req = route_query_input("GET", bad_cgis[i], NULL);
-        fn(&req, &resp);
+        fn(&req, NULL, &resp);
         assert(resp.status == 502 && !resp.chunked);
         if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
     }
@@ -701,7 +701,7 @@ static void cgi_responses_and_boundaries(void) {
     make_script("cgi-bin/midcrash.sh",
                 "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\npart'\nexit 2\n", 0700);
     req = route_query_input("GET", "/cgi-bin/midcrash.sh", NULL);
-    fn(&req, &resp);
+    fn(&req, NULL, &resp);
     assert(resp.status == 200 && resp.chunked);
     struct http_slice chunk = {0};
     assert(resp.body_provider.next_func(resp.body_provider.state, &chunk) == BODY_DATA);
@@ -713,7 +713,7 @@ static void cgi_responses_and_boundaries(void) {
     make_script("cgi-bin/sleepy.sh",
                 "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\nstart'\nsleep 30\n", 0700);
     req = route_query_input("GET", "/cgi-bin/sleepy.sh", NULL);
-    fn(&req, &resp);
+    fn(&req, NULL, &resp);
     assert(resp.status == 200 && resp.chunked);
     resp.body_provider.cleanup_func(resp.body_provider.state);
     int wstatus = 0;

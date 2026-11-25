@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C Web Server · Reverse Proxy &amp; Thread Pool Live Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f1e7;
+      --surface: #fbf8f1;
+      --surface-alt: #fffdf8;
+      --ink: #293d30;
+      --muted: #66776a;
+      --accent: #315a42;
+      --accent-soft: #dce8df;
+      --blue: #2d5f7a;
+      --blue-soft: #dceaf2;
+      --amber: #9b641e;
+      --amber-soft: #f6ebd7;
+      --danger: #b5453b;
+      --danger-soft: #fbeae8;
+      --border: #c9d1c7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+      margin-bottom: 22px;
+    }
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin: 0 0 4px;
+    }
+    h1 { margin: 0; font-size: 26px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    .nav-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav-pills a {
+      text-decoration: none;
+      font-size: 13px;
+      padding: 6px 11px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-alt);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+    .nodes {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin: 14px 0;
+    }
+    .node {
+      background: var(--surface-alt);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      transition: transform 0.15s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .node.pulse {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      box-shadow: 0 4px 14px rgba(49, 90, 66, 0.18);
+    }
+    .node.pulse-err {
+      border-color: var(--danger);
+      box-shadow: 0 4px 14px rgba(181, 69, 59, 0.2);
+    }
+    .node-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .badge.blue { background: var(--blue-soft); color: var(--blue); }
+    .badge.amber { background: var(--amber-soft); color: var(--amber); }
+    .badge.err { background: var(--danger-soft); color: var(--danger); }
+    .stat-num { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 12px; color: var(--muted); }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 12px 0;
+    }
+    button {
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 13px;
+      border-radius: 6px;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fffdf8;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: var(--surface-alt);
+      color: var(--accent);
+    }
+    button:disabled { opacity: 0.55; cursor: wait; }
+    input[type="text"] {
+      font: inherit;
+      font-size: 13px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-alt);
+      color: var(--ink);
+      min-width: 170px;
+    }
+    .rr-bar-wrap {
+      margin: 12px 0;
+      background: #e5e8e1;
+      border-radius: 999px;
+      height: 18px;
+      overflow: hidden;
+      display: flex;
+    }
+    .rr-a { background: var(--accent); height: 100%; transition: width 0.2s; }
+    .rr-b { background: var(--blue); height: 100%; transition: width 0.2s; }
+    .rr-legend {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 10px;
+    }
+    th, td {
+      text-align: left;
+      padding: 7px 8px;
+      border-bottom: 1px solid #e2e6de;
+    }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      background: #ece8dc;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .gantt {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .gantt-row {
+      display: grid;
+      grid-template-columns: 195px 1fr 90px;
+      gap: 10px;
+      align-items: center;
+      font-size: 13px;
+    }
+    .gantt-track {
+      position: relative;
+      height: 22px;
+      background: #ebe7dc;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .gantt-bar {
+      position: absolute;
+      top: 3px;
+      height: 16px;
+      border-radius: 4px;
+      background: var(--accent);
+      min-width: 4px;
+    }
+    .gantt-bar.slow { background: var(--amber); }
+    .gantt-bar.err { background: var(--danger); }
+    .bench-row {
+      display: grid;
+      grid-template-columns: 165px 1fr 110px;
+      gap: 10px;
+      align-items: center;
+      margin: 7px 0;
+      font-size: 13px;
+    }
+    .bench-track {
+      height: 16px;
+      background: #e6e2d7;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .bench-fill { height: 100%; background: var(--accent); }
+    .bench-fill.base { background: #8a958c; }
+    .bench-fill.warn { background: var(--danger); }
+    .pill-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <p class="eyebrow">Jungle Week 13 · C11 POSIX Web Server</p>
+        <h1>Reverse Proxy &amp; Blocking Thread Pool Live Demo</h1>
+      </div>
+      <nav class="nav-pills">
+        <a href="/cafe" target="_blank">/cafe (정적)</a>
+        <a href="/menu" target="_blank">/menu (정적)</a>
+        <a href="/greet?name=Chan" target="_blank">/greet (동적)</a>
+        <a href="/cgi-bin/order?item=latte&qty=2" target="_blank">/cgi-bin/order (CGI)</a>
+      </nav>
+    </header>
+
+    <section class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <h2>1. Reverse Proxy 라우팅 &amp; Round-Robin 실시간 관측</h2>
+        <button class="secondary" id="btn-reset">카운터 초기화</button>
+      </div>
+      <p class="sub">
+        같은 서버(<code>origin</code>)에서 정적/동적/CGI 경로는 로컬 처리하고, <code>/api/*</code> 요청만 백엔드로 중계합니다.
+        응답 헤더 <code>X-Backend-ID</code>와 <code>Via: 1.1 jungle-proxy</code>를 실시간으로 파싱해 시각화합니다.
+      </p>
+
+      <div class="nodes">
+        <div class="node" id="node-local">
+          <div class="node-head"><strong>Local Handlers</strong><span class="badge amber">In-Process</span></div>
+          <div class="stat-num" id="cnt-local">0</div>
+          <div class="sub" id="meta-local">/hello · /greet · /cgi-bin/order</div>
+        </div>
+        <div class="node" id="node-submission">
+          <div class="node-head"><strong>submission</strong><span class="badge blue">POST /api/submissions</span></div>
+          <div class="stat-num" id="cnt-submission">0</div>
+          <div class="sub" id="meta-submission">대기 중</div>
+        </div>
+        <div class="node" id="node-query-a">
+          <div class="node-head"><strong>query-a</strong><span class="badge">GET /api/* (A)</span></div>
+          <div class="stat-num" id="cnt-query-a">0</div>
+          <div class="sub" id="meta-query-a">대기 중</div>
+        </div>
+        <div class="node" id="node-query-b">
+          <div class="node-head"><strong>query-b</strong><span class="badge blue">GET /api/* (B)</span></div>
+          <div class="stat-num" id="cnt-query-b">0</div>
+          <div class="sub" id="meta-query-b">대기 중</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="btn-api-hello">GET /api/hello (1회)</button>
+        <button id="btn-api-status">GET /api/submission-status (1회)</button>
+        <button id="btn-rr-10">조회 10회 연속 (Round-Robin)</button>
+        <input type="text" id="post-body" value="demo-order-payload" aria-label="제출 본문">
+        <button id="btn-api-submit">POST /api/submissions</button>
+        <button class="secondary" id="btn-local-hello">GET /hello</button>
+        <button class="secondary" id="btn-local-cgi">GET /cgi-bin/order</button>
+      </div>
+
+      <div class="rr-bar-wrap" aria-label="Query A/B 비율">
+        <div class="rr-a" id="rr-a" style="width:50%"></div>
+        <div class="rr-b" id="rr-b" style="width:50%"></div>
+      </div>
+      <div class="rr-legend">
+        <span id="rr-label-a">query-a: 0건 (50%)</span>
+        <span id="rr-label-b">query-b: 0건 (50%)</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>시각</th><th>요청</th><th>상태</th><th>X-Backend-ID</th><th>Via</th><th>지연</th><th>응답 요약</th></tr>
+        </thead>
+        <tbody id="req-log"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>2. 동시성(HoL 완화) 실시간 Waterfall</h2>
+      <p class="sub">
+        프록시 요청과 로컬 요청 6건을 동시에 발사해 시작~완료 타임라인을 그립니다.
+        <code>query-a</code>를 <code>delayed-header</code> 모드로 띄워두면 느린 <code>504</code>(1초) 요청이 도는 동안에도 나머지 요청이 수 ms 만에 끝나는 것을 볼 수 있습니다.
+      </p>
+      <div class="controls">
+        <button id="btn-hol">동시 요청 6건 발사 (조회 2 + 제출 2 + 로컬 2)</button>
+        <span class="sub" id="hol-summary"></span>
+      </div>
+      <div class="gantt" id="gantt"></div>
+    </section>
+
+    <div class="grid-2">
+      <section class="card">
+        <h2>3. 검증 커버리지 요약 ("의도대로 작성" 4층 기준)</h2>
+        <div class="pill-strip">
+          <span class="badge">ASan/UBSan 9/9 PASS</span>
+          <span class="badge">TSan 0 warnings</span>
+          <span class="badge">Edge Cases 40/40 PASS</span>
+          <span class="badge">Iter5 Concurrency 7/7 PASS</span>
+          <span class="badge">FD 6 → 6 (누수 0)</span>
+        </div>
+        <ul class="sub" style="padding-left:18px;margin:0;line-height:1.7;">
+          <li><strong>기능 동작</strong>: Iteration 1~4 전 기능 회귀 + 40종 에지 케이스 통과</li>
+          <li><strong>구조 일치</strong>: 고정 스레드 풀 + 상한 128 링 버퍼 + <code>K==W</code> 대기 반례 검증</li>
+          <li><strong>안전·자원</strong>: <code>C13 SIGTERM</code>(0.75s), <code>E17</code> 5s 타임아웃, <code>g_running</code> <code>atomic_int</code> TSan 수정</li>
+          <li><strong>목적 달성</strong>: <code>S_MAX</code> 2.72x 향상(4w) &amp; <code>K&lt;W</code> HoL 제거 정량 측정</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>4. 실측 부하 비교 (Exp 1 &amp; Exp 2)</h2>
+        <div class="sub" style="margin-bottom:6px;"><strong>S_MAX 포화 처리량 (req/s, c=16)</strong></div>
+        <div class="bench-row"><span>main (순차)</span><div class="bench-track"><div class="bench-fill base" style="width:34%"></div></div><strong>5,404 req/s</strong></div>
+        <div class="bench-row"><span>C안 w=2</span><div class="bench-track"><div class="bench-fill" style="width:66%"></div></div><strong>10,458 req/s</strong></div>
+        <div class="bench-row"><span>C안 w=4 (기본)</span><div class="bench-track"><div class="bench-fill" style="width:100%"></div></div><strong>15,749 req/s</strong></div>
+
+        <div class="sub" style="margin:12px 0 6px;"><strong>800ms 느린 요청 K개 중 빠른 제출 p50 지연</strong></div>
+        <div class="bench-row"><span>main · K=2</span><div class="bench-track"><div class="bench-fill warn" style="width:100%"></div></div><strong>1,602.9 ms</strong></div>
+        <div class="bench-row"><span>C안 w=4 · K=2</span><div class="bench-track"><div class="bench-fill" style="width:2%"></div></div><strong>0.77 ms</strong></div>
+        <div class="bench-row"><span>C안 w=4 · K=4 (한계)</span><div class="bench-track"><div class="bench-fill base" style="width:50%"></div></div><strong>800.9 ms</strong></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const counts = { local: 0, submission: 0, "query-a": 0, "query-b": 0 };
+    const logBody = document.getElementById("req-log");
+
+    function pulseNode(id, isErr) {
+      const el = document.getElementById("node-" + id);
+      if (!el) return;
+      const cls = isErr ? "pulse-err" : "pulse";
+      el.classList.remove("pulse", "pulse-err");
+      void el.offsetWidth;
+      el.classList.add(cls);
+      setTimeout(() => el.classList.remove(cls), 500);
+    }
+
+    function updateRRBar() {
+      const a = counts["query-a"];
+      const b = counts["query-b"];
+      const total = a + b;
+      const pctA = total ? Math.round((a / total) * 100) : 50;
+      const pctB = total ? 100 - pctA : 50;
+      document.getElementById("rr-a").style.width = pctA + "%";
+      document.getElementById("rr-b").style.width = pctB + "%";
+      document.getElementById("rr-label-a").textContent = `query-a: ${a}건 (${pctA}%)`;
+      document.getElementById("rr-label-b").textContent = `query-b: ${b}건 (${pctB}%)`;
+    }
+
+    function addLogRow(method, path, status, backendId, via, ms, preview) {
+      const tr = document.createElement("tr");
+      const now = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+      const badgeCls = status >= 500 ? "badge err" : status >= 400 ? "badge amber" : "badge";
+      tr.innerHTML = `
+        <td>${now}</td>
+        <td><code>${method} ${path}</code></td>
+        <td><span class="${badgeCls}">${status}</span></td>
+        <td>${backendId || "-"}</td>
+        <td>${via || "-"}</td>
+        <td>${ms.toFixed(1)} ms</td>
+        <td class="sub">${preview}</td>
+      `;
+      logBody.prepend(tr);
+      while (logBody.children.length > 14) logBody.removeChild(logBody.lastChild);
+    }
+
+    async function sendOne(method, path, bodyText) {
+      const t0 = performance.now();
+      const opts = { method, cache: "no-store" };
+      if (method === "POST") {
+        opts.body = bodyText || "";
+        opts.headers = { "Content-Type": "text/plain" };
+      }
+      const res = await fetch(path, opts);
+      const buf = await res.arrayBuffer();
+      const ms = performance.now() - t0;
+      const backendId = res.headers.get("X-Backend-ID");
+      const via = res.headers.get("Via");
+      const text = new TextDecoder("utf-8", { fatal: false }).decode(buf).replace(/\0/g, "\\0");
+      const preview = text.length > 36 ? text.slice(0, 36) + "…" : text;
+
+      const nodeKey = path.startsWith("/api/")
+        ? (backendId || (method === "POST" ? "submission" : null))
+        : "local";
+      if (nodeKey && nodeKey in counts) {
+        counts[nodeKey]++;
+        document.getElementById("cnt-" + nodeKey).textContent = counts[nodeKey];
+        document.getElementById("meta-" + nodeKey).textContent = `최근 ${res.status} (${ms.toFixed(1)} ms)`;
+        pulseNode(nodeKey, res.status >= 400);
+      }
+      updateRRBar();
+      addLogRow(method, path, res.status, backendId, via, ms, preview);
+      return { method, path, status: res.status, backendId, ms };
+    }
+
+    document.getElementById("btn-api-hello").onclick = () => sendOne("GET", "/api/hello");
+    document.getElementById("btn-api-status").onclick = () => sendOne("GET", "/api/submission-status");
+    document.getElementById("btn-api-submit").onclick = () =>
+      sendOne("POST", "/api/submissions", document.getElementById("post-body").value);
+    document.getElementById("btn-local-hello").onclick = () => sendOne("GET", "/hello");
+    document.getElementById("btn-local-cgi").onclick = () => sendOne("GET", "/cgi-bin/order?item=latte&qty=2");
+
+    document.getElementById("btn-rr-10").onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        for (let i = 0; i < 10; i++) {
+          await sendOne("GET", "/api/submission-status");
+        }
+      } finally {
+        e.target.disabled = false;
+      }
+    };
+
+    document.getElementById("btn-reset").onclick = () => {
+      for (const k of Object.keys(counts)) {
+        counts[k] = 0;
+        document.getElementById("cnt-" + k).textContent = "0";
+      }
+      document.getElementById("meta-submission").textContent = "대기 중";
+      document.getElementById("meta-query-a").textContent = "대기 중";
+      document.getElementById("meta-query-b").textContent = "대기 중";
+      document.getElementById("meta-local").textContent = "/hello · /greet · /cgi-bin/order";
+      logBody.innerHTML = "";
+      updateRRBar();
+    };
+
+    document.getElementById("btn-hol").onclick = async (e) => {
+      e.target.disabled = true;
+      const gantt = document.getElementById("gantt");
+      gantt.innerHTML = "<div class='sub'>요청 6건 동시 실행 중...</div>";
+      const jobs = [
+        ["GET", "/api/submission-status"],
+        ["GET", "/api/hello"],
+        ["POST", "/api/submissions", "concurrent-1"],
+        ["GET", "/hello"],
+        ["POST", "/api/submissions", "concurrent-2"],
+        ["GET", "/greet?name=Demo"],
+      ];
+      const base = performance.now();
+      const rows = await Promise.all(jobs.map(async ([m, p, b]) => {
+        const s = performance.now() - base;
+        const r = await sendOne(m, p, b);
+        const end = performance.now() - base;
+        return { label: `${m} ${p.split("?")[0]}`, start: s, end, dur: end - s, ...r };
+      }));
+      const maxEnd = Math.max(...rows.map(r => r.end), 10);
+      gantt.innerHTML = "";
+      for (const r of rows) {
+        const left = (r.start / maxEnd) * 100;
+        const width = Math.max(((r.end - r.start) / maxEnd) * 100, 1.2);
+        const cls = r.status >= 500 ? "gantt-bar err" : r.dur > 250 ? "gantt-bar slow" : "gantt-bar";
+        const row = document.createElement("div");
+        row.className = "gantt-row";
+        row.innerHTML = `
+          <div><code>${r.label}</code> <span class="sub">${r.backendId || "local"}</span></div>
+          <div class="gantt-track"><div class="${cls}" style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></div></div>
+          <div><strong>${r.dur.toFixed(1)} ms</strong> (${r.status})</div>
+        `;
+        gantt.appendChild(row);
+      }
+      document.getElementById("hol-summary").textContent =
+        `전체 완료: ${maxEnd.toFixed(1)} ms (완료 순서 = 각 막대 끝 위치)`;
+      e.target.disabled = false;
+    };
+  </script>
+</body>
+</html>

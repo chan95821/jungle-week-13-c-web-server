@@ -18,7 +18,7 @@ static int send_prepared_response(int fd, struct router_response *response,
                                   bool head_request, const struct io_context *io);
 static void finish_response(int fd, const struct io_context *io);
 
-void handle_client(int client_fd, const volatile sig_atomic_t *running,
+void handle_client(int client_fd, const struct cancel_signal *cancel,
                    const struct timespec *accepted_at,
                    const struct proxy_config *proxy_config,
                    struct proxy_selection_state *selection) {
@@ -31,12 +31,12 @@ void handle_client(int client_fd, const volatile sig_atomic_t *running,
     bool head_request = false;
     struct timespec header_deadline = *accepted_at;
     header_deadline.tv_sec += HEADER_DEADLINE_SECONDS;
-    struct io_context request_io = {running, &header_deadline};
-    const struct io_context client_response_io = {running, NULL};
+    struct io_context request_io = {cancel, &header_deadline};
+    const struct io_context client_response_io = {cancel, NULL};
     int status = 0;
 
-    if (set_close_on_exec(client_fd) < 0) {
-        perror("client cloexec");
+    if (set_close_on_exec(client_fd) < 0 || socket_configure_timeouts(client_fd) < 0) {
+        perror("client socket setup");
         goto cleanup;
     }
 
@@ -109,9 +109,9 @@ respond:
         if (status == 200 && selected_route.proxy_route != PROXY_ROUTE_LOCAL) {
             const struct sockaddr_in *backend =
                 proxy_select_backend(proxy_config, selection, selected_route.proxy_route);
-            proxy_prepare_response(backend, &request, running, &response);
+            proxy_prepare_response(backend, &request, cancel, &response);
         } else if (status == 200 && selected_route.local_handler)
-            selected_route.local_handler(&request, &response);
+            selected_route.local_handler(&request, cancel, &response);
         else router_prepare_error(&response, status, allow);
 
         int send_result = send_prepared_response(client_fd, &response, head_request, &client_response_io);
@@ -193,11 +193,15 @@ static int send_chunked_body(int fd, struct body_provider *provider,
         errno = 0;
         enum body_result result = provider->next_func(provider->state, &chunk);
         if (result == BODY_END) {
-            if (send_all_with_deadline(fd, "0\r\n", 3, io) < 0) return -1;
-            if (provider->trailers && provider->trailers->length &&
-                send_all_with_deadline(fd, provider->trailers->data,
-                                        provider->trailers->length, io) < 0) return -1;
-            return send_all_with_deadline(fd, "\r\n", 2, io);
+            if (!provider->trailers || !provider->trailers->length) {
+                return send_all_with_deadline(fd, "0\r\n\r\n", 5, io);
+            }
+            struct iovec end_iov[3] = {
+                {.iov_base = (void *)"0\r\n", .iov_len = 3},
+                {.iov_base = (void *)provider->trailers->data, .iov_len = provider->trailers->length},
+                {.iov_base = (void *)"\r\n", .iov_len = 2}
+            };
+            return send_allv_with_deadline(fd, end_iov, 3, io);
         }
         if (result != BODY_DATA) {
             if (result != BODY_ERROR || errno == 0) errno = EIO;
@@ -215,9 +219,12 @@ static int send_chunked_body(int fd, struct body_provider *provider,
             return -1;
         }
 
-        if (send_all_with_deadline(fd, prefix, (size_t)count, io) < 0) return -1;
-        if (send_all_with_deadline(fd, chunk.data, chunk.length, io) < 0) return -1;
-        if (send_all_with_deadline(fd, "\r\n", 2, io) < 0) return -1;
+        struct iovec chunk_iov[3] = {
+            {.iov_base = prefix, .iov_len = (size_t)count},
+            {.iov_base = (void *)chunk.data, .iov_len = chunk.length},
+            {.iov_base = (void *)"\r\n", .iov_len = 2}
+        };
+        if (send_allv_with_deadline(fd, chunk_iov, 3, io) < 0) return -1;
     }
 }
 
@@ -291,7 +298,7 @@ static void finish_response(int fd, const struct io_context *io) {
     if (clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) return;
     deadline.tv_sec += DRAIN_DEADLINE_SECONDS;
 
-    struct io_context drain = {io->running, &deadline};
+    struct io_context drain = {io->cancel, &deadline};
     unsigned char discard[1024];
     size_t discarded = 0;
     while (server_is_running(&drain) && discarded < DRAIN_MAX_BYTES) {

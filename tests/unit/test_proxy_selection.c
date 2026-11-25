@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,7 +126,10 @@ static void test_routes_and_selection(void) {
         .submission_backend = {.sin_port = htons(8001)},
         .query_backends = {{.sin_port = htons(8002)}, {.sin_port = htons(8003)}}
     };
-    struct proxy_selection_state selection = {0}, independent_selection = {0};
+    struct proxy_selection_state selection, independent_selection;
+    assert(proxy_selection_init(&selection) == 0);
+    assert(proxy_selection_init(&independent_selection) == 0);
+
     struct http_request request = {
         .method = slice("GET"), .path = slice("/api/submission-status"),
         .target = slice("/api/submission-status?id=7")
@@ -151,6 +155,92 @@ static void test_routes_and_selection(void) {
     assert(http_select_route(&request, &selected, &allow) == 0 && selected.local_handler);
     assert(proxy_select_backend(&config, &selection, selected.proxy_route) == NULL);
     assert(selection.next_query_backend == 1);
+
+    proxy_selection_destroy(&independent_selection);
+    proxy_selection_destroy(&selection);
+}
+
+enum {
+    CONCURRENT_WORKERS = 8,
+    SELECTIONS_PER_WORKER = 1000
+};
+
+struct selection_worker_args {
+    const struct proxy_config *config;
+    struct proxy_selection_state *selection;
+    size_t query_hits[2];
+    size_t submission_hits;
+};
+
+/* Worker routine interleaving query and submission backend selections. */
+static void *selection_worker_main(void *arg) {
+    struct selection_worker_args *worker = arg;
+
+    for (size_t i = 0; i < SELECTIONS_PER_WORKER; ++i) {
+        const struct sockaddr_in *query_backend = proxy_select_backend(
+            worker->config, worker->selection, PROXY_ROUTE_QUERY);
+        if (query_backend == &worker->config->query_backends[0]) {
+            ++worker->query_hits[0];
+        } else if (query_backend == &worker->config->query_backends[1]) {
+            ++worker->query_hits[1];
+        } else {
+            assert(0 && "unexpected query backend pointer");
+        }
+
+        const struct sockaddr_in *submission_backend = proxy_select_backend(
+            worker->config, worker->selection, PROXY_ROUTE_SUBMISSIONS);
+        assert(submission_backend == &worker->config->submission_backend);
+        ++worker->submission_hits;
+    }
+
+    return NULL;
+}
+
+/* Verify NULL lifecycle handling for proxy_selection_init/destroy. */
+static void test_selection_lifecycle_null(void) {
+    errno = 0;
+    assert(proxy_selection_init(NULL) == -1);
+    assert(errno == EINVAL);
+    proxy_selection_destroy(NULL);
+}
+
+/* Verify thread-safe 50:50 round-robin balance under concurrent query load. */
+static void test_concurrent_query_selection(void) {
+    struct proxy_config config = {
+        .submission_backend = {.sin_port = htons(8001)},
+        .query_backends = {{.sin_port = htons(8002)}, {.sin_port = htons(8003)}}
+    };
+    struct proxy_selection_state selection;
+    assert(proxy_selection_init(&selection) == 0);
+
+    pthread_t threads[CONCURRENT_WORKERS];
+    struct selection_worker_args args[CONCURRENT_WORKERS];
+    for (size_t i = 0; i < CONCURRENT_WORKERS; ++i) {
+        args[i] = (struct selection_worker_args){
+            .config = &config,
+            .selection = &selection,
+            .query_hits = {0, 0},
+            .submission_hits = 0
+        };
+        assert(pthread_create(&threads[i], NULL, selection_worker_main, &args[i]) == 0);
+    }
+
+    size_t total_query_hits[2] = {0, 0};
+    size_t total_submission_hits = 0;
+    for (size_t i = 0; i < CONCURRENT_WORKERS; ++i) {
+        assert(pthread_join(threads[i], NULL) == 0);
+        total_query_hits[0] += args[i].query_hits[0];
+        total_query_hits[1] += args[i].query_hits[1];
+        total_submission_hits += args[i].submission_hits;
+    }
+
+    size_t expected_per_backend = (CONCURRENT_WORKERS * SELECTIONS_PER_WORKER) / 2;
+    assert(total_query_hits[0] == expected_per_backend);
+    assert(total_query_hits[1] == expected_per_backend);
+    assert(total_submission_hits == CONCURRENT_WORKERS * SELECTIONS_PER_WORKER);
+    assert(selection.next_query_backend == 0);
+
+    proxy_selection_destroy(&selection);
 }
 
 static void test_protected_connection_options(void) {
@@ -214,7 +304,9 @@ int main(void) {
     test_config(path);
     assert(unlink(path) == 0);
     test_route_table();
+    test_selection_lifecycle_null();
     test_routes_and_selection();
+    test_concurrent_query_selection();
     test_protected_connection_options();
     puts("[PASS] proxy config, method routing and round-robin selection");
     return 0;
