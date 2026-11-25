@@ -1,10 +1,11 @@
-#define _XOPEN_SOURCE 700
+#define _GNU_SOURCE
 #include "handlers.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -334,7 +335,8 @@ static char *make_env_var(const char *key, struct http_slice value) {
     return entry;
 }
 
-/* Fork CGI child with minimal envp and pipe stdout; parent closes write end immediately. */
+/* 멀티스레드에서 fork 이후 libc 상태를 건드리지 않도록 POSIX spawn을 사용한다.
+ * 자식의 stdin/stdout, SIGPIPE 기본 동작, 관리자의 차단 신호 mask를 명시한다. */
 static int spawn_cgi_process(const char *resolved, const char *script_name,
                              struct http_slice query, pid_t *pid_out, int *fd_out) {
     *pid_out = -1;
@@ -356,44 +358,63 @@ static int spawn_cgi_process(const char *resolved, const char *script_name,
     char *envp[] = {env_method, env_query, env_script, env_proto, env_path, NULL};
 
     int pipefd[2];
-    if (pipe(pipefd) < 0) {
+#ifdef __linux__
+    int pipe_result = pipe2(pipefd, O_CLOEXEC);
+#else
+    int pipe_result = pipe(pipefd);
+    if (pipe_result == 0 &&
+        (fcntl(pipefd[0], F_SETFD, FD_CLOEXEC) < 0 ||
+         fcntl(pipefd[1], F_SETFD, FD_CLOEXEC) < 0)) {
+        close(pipefd[0]); close(pipefd[1]); pipe_result = -1;
+    }
+#endif
+    if (pipe_result < 0) {
         free(exec_arg); free(env_method); free(env_query);
         free(env_script); free(env_proto); free(env_path);
         return 500;
     }
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(pipefd[0]);
-        close(pipefd[1]);
-        free(exec_arg); free(env_method); free(env_query);
-        free(env_script); free(env_proto); free(env_path);
-        return 500;
+    /* 표준 FD가 닫혀 시작된 경우에도 file actions가 pipe를 잘못 닫지 않도록 3 이상으로 옮긴다. */
+    int spawn_error = 0;
+    for (size_t i = 0; i < 2; ++i) {
+        if (pipefd[i] >= 3) continue;
+        int duplicate = fcntl(pipefd[i], F_DUPFD_CLOEXEC, 3);
+        if (duplicate < 0) { spawn_error = errno; break; }
+        close(pipefd[i]);
+        pipefd[i] = duplicate;
     }
-    if (pid == 0) {
-        signal(SIGPIPE, SIG_DFL);
-        close(pipefd[0]);
-
-        int devnull = open("/dev/null", O_RDONLY);
-        if (devnull < 0) _exit(127);
-        if (devnull != STDIN_FILENO) {
-            if (dup2(devnull, STDIN_FILENO) < 0) _exit(127);
-            close(devnull);
-        }
-
-        if (pipefd[1] != STDOUT_FILENO) {
-            if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(127);
-            close(pipefd[1]);
-        }
-
-        execve(resolved, argv, envp);
-        _exit(127);
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attributes;
+    bool actions_ready = false, attributes_ready = false;
+    pid_t pid = -1;
+    if (!spawn_error) {
+        spawn_error = posix_spawn_file_actions_init(&actions);
+        actions_ready = !spawn_error;
     }
-
+    if (!spawn_error) {
+        spawn_error = posix_spawnattr_init(&attributes);
+        attributes_ready = !spawn_error;
+    }
+    sigset_t empty_mask, defaults;
+    sigemptyset(&empty_mask);
+    sigemptyset(&defaults);
+    sigaddset(&defaults, SIGPIPE);
+    if (!spawn_error) spawn_error = posix_spawnattr_setsigmask(&attributes, &empty_mask);
+    if (!spawn_error) spawn_error = posix_spawnattr_setsigdefault(&attributes, &defaults);
+    if (!spawn_error) spawn_error = posix_spawnattr_setflags(&attributes,
+        POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
+    if (!spawn_error) spawn_error = posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    if (!spawn_error) spawn_error = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    if (!spawn_error) spawn_error = posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    if (!spawn_error) spawn_error = posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+    if (!spawn_error) spawn_error = posix_spawn(&pid, resolved, &actions, &attributes, argv, envp);
+    if (attributes_ready) posix_spawnattr_destroy(&attributes);
+    if (actions_ready) posix_spawn_file_actions_destroy(&actions);
     close(pipefd[1]);
     free(exec_arg); free(env_method); free(env_query);
     free(env_script); free(env_proto); free(env_path);
 
+    if (spawn_error) { close(pipefd[0]); errno = spawn_error; return 500; }
     *pid_out = pid;
     *fd_out = pipefd[0];
     return 0;
