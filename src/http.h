@@ -13,8 +13,8 @@ struct http_slice {
     size_t length;
 };
 
-/* Slices borrow caller-owned request storage (B: event_connection).
- * This struct frees nothing; the owner keeps storage alive through response/cleanup. */
+/* 각 slice는 호출자가 소유한 요청 메모리(B에서는 event_connection)를 빌린다.
+ * 이 구조체는 메모리를 해제하지 않으며, owner가 응답/정리가 끝날 때까지 원본을 유지한다. */
 struct http_request {
     struct http_slice method;
     struct http_slice target;

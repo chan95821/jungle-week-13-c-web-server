@@ -1,7 +1,7 @@
 #ifndef PROXY_INTERNAL_H
 #define PROXY_INTERNAL_H
 
-/* Private protocol/state helpers shared by the sequential baseline and B driver. */
+/* 기존 순차 기준 구현과 B 이벤트 경로가 함께 사용하는 내부 HTTP 검증/상태 도구다. */
 #include "proxy.h"
 #include "socket_io.h"
 
@@ -30,8 +30,8 @@ struct proxy_stream {
     int status;
 };
 
-/* Caller-owned header workspace: stack in baseline, connection-owned heap in B.
- * fields/status_line borrow raw_header and must not outlive this workspace. */
+/* 호출자가 소유하는 헤더 작업 공간: 순차 경로에서는 스택, B에서는 연결의 힙 메모리다.
+ * fields/status_line은 raw_header를 빌리므로 workspace를 해제한 뒤 사용할 수 없다. */
 struct proxy_response_headers {
     unsigned char raw_header[REQ_HEADER_MAX_BYTES];
     size_t raw_header_length;

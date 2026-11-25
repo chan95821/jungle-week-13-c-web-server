@@ -35,6 +35,8 @@ int forward_request_to_backend(struct proxy_stream *stream,
     return 0;
 }
 
+/* I/O 없이 백엔드 요청 헤더만 만든다. 기존 순차 송신과 B의 부분 송신이 같은 정책을 사용한다.
+ * raw target/본문 길이는 유지하고 Host는 선택 주소로 재작성한다. 성공 0, 용량/형식 오류 -1. */
 int build_backend_request_header(const struct sockaddr_in *backend,
                                   const struct http_request *request,
                                   unsigned char *header, size_t capacity, size_t *length) {
@@ -98,6 +100,8 @@ int prepare_backend_response_headers(struct proxy_stream *stream) {
     return 0;
 }
 
+/* CRLFCRLF까지 완성된 블록 하나를 검증해 출력 헤더에 누적한다.
+ * 0=중간 응답이라 다음 블록 필요, 1=최종 헤더 준비, -1=거절. B는 반환 후 다음 recv에서 이어간다. */
 int consume_backend_header_block(struct proxy_stream *stream,
                                   struct proxy_response_headers *headers) {
     if (parse_backend_headers(stream, headers) < 0) return -1;

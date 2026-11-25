@@ -8,6 +8,8 @@
 
 static int read_trailers(struct proxy_stream *);
 
+/* 순차/B 두 경로에서 같은 trailer 금지 규칙을 적용한다. 길이·라우팅·표현 해석을 바꾸는 필드와
+ * hop-by-hop 필드는 trailer로 전달하지 않는다. 메모리 할당이나 소켓 I/O는 하지 않는다. */
 bool backend_trailer_is_allowed(const struct proxy_stream *stream, struct http_field field) {
     return !proxy_header_is_hop_by_hop((struct http_slice){
                 stream->connection_fields, stream->connection_fields_length}, field.name) &&

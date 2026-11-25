@@ -19,6 +19,7 @@ main: accept4 → 상한 있는 worker 큐 → eventfd 알림
 - [요청부터 종료까지 코드 흐름](docs/iteration-5/jaeseong/iteration-5-walkthrough.md)
 - [기능 검증 범위와 결과](docs/iteration-5/jaeseong/iteration-5-tests.md)
 - [성능 측정 제안](docs/iteration-5/jaeseong/iteration-5-performance-plan.md)
+- [B 성능 측정 결과](docs/iteration-5/jaeseong/iteration-5-performance-results.md) — 30회 측정, 준비 구간 실패는 별도 기록
 
 B는 Linux/WSL2의 epoll/eventfd/signalfd를 사용한다. 기존 Ubuntu가 VHDX 오류로 실행되지 않아 이번 개발·검증은 Debian WSL에서 수행하며, 다른 OS의 실행을 보장하지 않는다.
 
@@ -140,3 +141,7 @@ make verify: Iteration 1·2·3 정적·3 동적 회귀와 Iteration 4 C 백엔�
 - 기본 스레드는 메인 1 + 네트워크 4 + 파일/CGI 보조 2 = 7개다. 리스너는 메인만 수락하고 연결은 한 작업자가 종료까지 담당한다.
 - 동시 연결 1만 개는 검토 목표다. 성능 측정은 환경·조건·지표를 제시하고 별도 허락 후 진행한다.
 - 기존 정적 파일의 realpath/open 사이 경합 등 운영상 한계는 이번 프록시 추가로 해결했다고 주장하지 않는다.
+
+## B 성능 재측정
+
+가독성 정리 후 현재 코드로 기존 조건 30회를 다시 측정했다. [현재 코드 성능 결과](docs/iteration-5/jaeseong/iteration-5-performance-retest-results.md)에 환경·조건별 중앙값/범위·실패·RSS·FD·원본 자료를 기록했다. 측정 144,000건·준비 28,800건 모두 성공했다. 추가 조건은 [재측정 계획](docs/iteration-5/jaeseong/iteration-5-performance-retest-plan.md)에서 사용자 선택을 기다리고 있다. 이전 [리팩토링 전 측정](docs/iteration-5/jaeseong/iteration-5-performance-results.md)도 보존한다.

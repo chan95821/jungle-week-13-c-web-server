@@ -26,9 +26,9 @@ static void check_partial_output(void) {
     set_connection_output(&connection, (struct http_slice){(const unsigned char *)"P\0FX", 4},
                             (struct http_slice){body, body_length},
                             (struct http_slice){(const unsigned char *)"\r\n", 2});
-    int result;
-    do { result = send_pending_output(&connection, &endpoint); } while (result == 2);
-    assert(result == 0); /* 데이터를 아직 읽지 않았으므로 EAGAIN이어야 한다. */
+    enum send_result result;
+    do { result = send_pending_output(&connection, &endpoint); } while (result == SEND_CAN_CONTINUE);
+    assert(result == SEND_WOULD_BLOCK); /* 아직 읽지 않았으므로 송신 버퍼가 가득 차야 한다. */
     assert(connection.response_started && connection.output.offset > 0);
     size_t total = 0;
     for (unsigned int step = 0; step < 10000 && total < body_length + 6; ++step) {
@@ -36,9 +36,9 @@ static void check_partial_output(void) {
         if (count > 0) total += (size_t)count;
         else assert(count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
         result = send_pending_output(&connection, &endpoint);
-        assert(result >= 0);
+        assert(result != SEND_FAILED);
     }
-    assert(total == body_length + 6 && result == 1);
+    assert(total == body_length + 6 && result == SEND_FINISHED);
     assert(!memcmp(received, "P\0FX", 4));
     assert(!memcmp(received + 4, body, body_length));
     assert(!memcmp(received + 4 + body_length, "\r\n", 2));
