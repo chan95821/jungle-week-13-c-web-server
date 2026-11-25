@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server.h"
+#include "event_server.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -9,16 +10,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* Process cancellation only; no per-connection state is global. */
-static volatile sig_atomic_t g_running = 1;
-
-static void on_shutdown_signal(int sig);
 static int setup_signals(void);
 
-/* Read configuration, open one listener, then handle one request at a time. */
+/* 설정 → listener 하나 → 고정 worker/epoll → 종료/join. 연결 처리 자체는 worker가 소유한다. */
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <port> <proxy.conf>\n", argv[0]);
+    if (argc != 3 && argc != 4) {
+        fprintf(stderr, "Usage: %s <port> <proxy.conf> [workers:1..64]\n", argv[0]);
         return 1;
     }
     uint16_t port;
@@ -28,7 +25,11 @@ int main(int argc, char *argv[]) {
     }
 
     struct proxy_config proxy_config;
-    struct proxy_selection_state selection = {0};
+    uint16_t worker_count = EVENT_DEFAULT_WORKERS;
+    if (argc == 4 && (parse_port(argv[3], &worker_count) < 0 || worker_count > EVENT_MAX_WORKERS)) {
+        fprintf(stderr, "Invalid worker count: %s\n", argv[3]);
+        return 1;
+    }
     if (proxy_load_config(argv[2], &proxy_config) < 0) {
         perror("proxy configuration");
         return 1;
@@ -48,48 +49,17 @@ int main(int argc, char *argv[]) {
     int listener_fd = open_listenfd(port);
     if (listener_fd < 0) return 1;
 
-    int exit_status = 0;
-    while (g_running) {
-        int client_fd = accept(listener_fd, NULL, NULL);
-        if (client_fd < 0) {
-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK ||
-                errno == ECONNABORTED) continue;
-            perror("accept");
-            exit_status = 1;
-            break;
-        }
-
-        struct timespec accepted_at;
-        if (clock_gettime(CLOCK_MONOTONIC, &accepted_at) < 0) {
-            perror("clock_gettime");
-            close(client_fd);
-            exit_status = 1;
-            break;
-        }
-
-        if (g_running) handle_client(client_fd, &g_running, &accepted_at,
-                                     &proxy_config, &selection);
-        /* Linux: do not retry close after EINTR; the FD may be released. */
-        if (close(client_fd) < 0) perror("close client");
-    }
+    int exit_status = run_event_server(listener_fd, &proxy_config, worker_count) < 0;
+    if (exit_status) perror("event server");
 
     if (close(listener_fd) < 0) { perror("close listener"); exit_status = 1; }
     return exit_status;
 }
 
-/* Signal handler: clear global shutdown flag asynchronously without blocking. */
-static void on_shutdown_signal(int sig) {
-    (void)sig;
-    g_running = 0;
-}
-
-/* Install SIGINT/SIGTERM handlers and ignore SIGPIPE. Return 0 or -1. */
+/* SIGINT/TERM은 run_event_server의 signalfd로 처리한다. SIGPIPE만 프로세스 전체에서 무시. */
 static int setup_signals(void) {
     struct sigaction stop = {0};
-    stop.sa_handler = on_shutdown_signal;
-    if (sigemptyset(&stop.sa_mask) < 0 ||
-        sigaction(SIGINT, &stop, NULL) < 0 ||
-        sigaction(SIGTERM, &stop, NULL) < 0) return -1;
     stop.sa_handler = SIG_IGN;
+    if (sigemptyset(&stop.sa_mask) < 0) return -1;
     return sigaction(SIGPIPE, &stop, NULL);
 }

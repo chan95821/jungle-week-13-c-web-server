@@ -1,6 +1,7 @@
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Werror -O2
 ASAN_FLAGS = -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined
+THREAD_FLAGS = -pthread
 
 BUILD_DIR = build
 OBJ_DIR = $(BUILD_DIR)/obj
@@ -13,10 +14,11 @@ TEST_BINS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
 HANDLER_SRCS = src/handlers/basic.c src/handlers/static.c src/handlers/greet.c src/handlers/cgi.c
 PROXY_SRCS = src/proxy.c src/proxy_transfer.c src/proxy_io.c src/proxy_headers.c src/proxy_body.c
-SRCS = src/main.c src/server.c src/socket_io.c src/http.c src/router.c $(PROXY_SRCS) $(HANDLER_SRCS)
+EVENT_SRCS = src/event_server.c src/event_worker.c src/event_connection.c src/event_proxy.c src/local_work.c
+SRCS = src/main.c src/server.c src/socket_io.c src/http.c src/router.c $(PROXY_SRCS) $(HANDLER_SRCS) $(EVENT_SRCS)
 LIFECYCLE_TEST_OBJS = $(patsubst src/%.c,$(BUILD_DIR)/test-obj/%.o,$(PROXY_SRCS))
 OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
-HEADERS = src/server.h src/socket_io.h src/http.h src/router.h src/proxy.h src/proxy_internal.h src/handlers/handlers.h
+HEADERS = src/server.h src/socket_io.h src/http.h src/router.h src/proxy.h src/proxy_internal.h src/handlers/handlers.h src/event_server.h src/event_internal.h
 TEST_SRCS = src/server.c src/socket_io.c src/http.c src/router.c $(PROXY_SRCS) $(HANDLER_SRCS)
 
 .PHONY: all test verify verify-edge clean server cgi backend $(TEST_NAMES)
@@ -27,14 +29,14 @@ $(BUILD_DIR) $(OBJ_DIR) $(CGI_DIR):
 	mkdir -p $@
 
 $(TARGET): $(OBJS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(OBJS)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -o $@ $(OBJS)
 
 $(CGI_DIR)/%: cgi-src/%.c | $(CGI_DIR)
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(OBJ_DIR)/%.o: src/%.c $(HEADERS)
 	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -c -o $@ $<
 
 server: $(TARGET)
 

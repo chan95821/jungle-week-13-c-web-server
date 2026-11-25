@@ -161,6 +161,7 @@ void refresh_connection_interest(struct event_connection *connection);
 int64_t connection_next_deadline(const struct event_connection *connection);
 void set_connection_output(struct event_connection *, struct http_slice,
                             struct http_slice, struct http_slice);
+int send_pending_output(struct event_connection *, struct event_endpoint *);
 void prepare_connection_error(struct event_connection *, int status);
 void start_client_response(struct event_connection *connection);
 void prepare_client_body_chunk(struct event_connection *, struct http_slice chunk);
