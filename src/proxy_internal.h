@@ -1,7 +1,7 @@
 #ifndef PROXY_INTERNAL_H
 #define PROXY_INTERNAL_H
 
-/* Private to the sequential proxy implementation and its unit tests. */
+/* Private protocol/state helpers shared by the sequential baseline and B driver. */
 #include "proxy.h"
 #include "socket_io.h"
 
@@ -30,7 +30,8 @@ struct proxy_stream {
     int status;
 };
 
-/* Preparation-only stack workspace. fields/status_line borrow raw_header. */
+/* Caller-owned header workspace: stack in baseline, connection-owned heap in B.
+ * fields/status_line borrow raw_header and must not outlive this workspace. */
 struct proxy_response_headers {
     unsigned char raw_header[REQ_HEADER_MAX_BYTES];
     size_t raw_header_length;
