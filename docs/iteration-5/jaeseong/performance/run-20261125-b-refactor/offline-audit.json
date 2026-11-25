@@ -1,0 +1,8 @@
+{
+  "current_service_sources_match_snapshot": true,
+  "request_csv_counts": {
+    "warmup": 28800,
+    "measured": 144000
+  },
+  "completed_trials": 30
+}

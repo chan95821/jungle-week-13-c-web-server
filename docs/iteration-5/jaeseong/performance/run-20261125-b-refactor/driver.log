@@ -1,0 +1,32 @@
+Smoke passed: both paths, binary POST/GET, response validation and offered counts.
+[01/30] b      q= 50 r=1 query=50.00/s submit-p95=4.069699999998733ms fail=0/150+0/750 cap=2
+[02/30] direct q= 50 r=1 query=50.00/s submit-p95=3.756913000003692ms fail=0/150+0/750 cap=2
+[03/30] direct q= 50 r=2 query=50.00/s submit-p95=3.2962590000025216ms fail=0/150+0/750 cap=2
+[04/30] b      q= 50 r=2 query=50.00/s submit-p95=3.7403549999908137ms fail=0/150+0/750 cap=2
+[05/30] b      q= 50 r=3 query=50.00/s submit-p95=3.853417999991393ms fail=0/150+0/750 cap=2
+[06/30] direct q= 50 r=3 query=50.00/s submit-p95=3.142451000002211ms fail=0/150+0/750 cap=2
+[07/30] b      q=100 r=1 query=100.00/s submit-p95=3.877897999998936ms fail=0/150+0/1500 cap=2
+[08/30] direct q=100 r=1 query=100.00/s submit-p95=3.3770919999938087ms fail=0/150+0/1500 cap=2
+[09/30] direct q=100 r=2 query=100.00/s submit-p95=3.21984900000416ms fail=0/150+0/1500 cap=2
+[10/30] b      q=100 r=2 query=100.00/s submit-p95=3.9644039999586766ms fail=0/150+0/1500 cap=2
+[11/30] b      q=100 r=3 query=100.00/s submit-p95=3.7086619999797676ms fail=0/150+0/1500 cap=2
+[12/30] direct q=100 r=3 query=100.00/s submit-p95=3.2156169999950635ms fail=0/150+0/1500 cap=2
+[13/30] b      q=200 r=1 query=200.00/s submit-p95=2.88044599997761ms fail=0/150+0/3000 cap=2
+[14/30] direct q=200 r=1 query=200.00/s submit-p95=2.812013999971441ms fail=0/150+0/3000 cap=2
+[15/30] direct q=200 r=2 query=200.00/s submit-p95=2.5678140000309213ms fail=0/150+0/3000 cap=2
+[16/30] b      q=200 r=2 query=200.00/s submit-p95=3.0869739999275225ms fail=0/150+0/3000 cap=2
+[17/30] b      q=200 r=3 query=200.00/s submit-p95=3.126661999999669ms fail=0/150+0/3000 cap=2
+[18/30] direct q=200 r=3 query=200.00/s submit-p95=2.3864830000093207ms fail=0/150+0/3000 cap=2
+[19/30] b      q=400 r=1 query=400.00/s submit-p95=3.577453999980662ms fail=0/150+0/6000 cap=17
+[20/30] direct q=400 r=1 query=400.00/s submit-p95=2.2453309999832527ms fail=0/150+0/6000 cap=13
+[21/30] direct q=400 r=2 query=400.00/s submit-p95=3.062919999990754ms fail=0/150+0/6000 cap=7
+[22/30] b      q=400 r=2 query=400.00/s submit-p95=3.6994949999780147ms fail=0/150+0/6000 cap=10
+[23/30] b      q=400 r=3 query=400.00/s submit-p95=3.67231300003823ms fail=0/150+0/6000 cap=10
+[24/30] direct q=400 r=3 query=400.00/s submit-p95=2.5498599999878024ms fail=0/150+0/6000 cap=5
+[25/30] b      q=800 r=1 query=800.00/s submit-p95=4.196598000021368ms fail=0/150+0/12000 cap=232
+[26/30] direct q=800 r=1 query=799.94/s submit-p95=3.7672769999517186ms fail=0/150+0/12000 cap=45
+[27/30] direct q=800 r=2 query=799.98/s submit-p95=4.082951999976103ms fail=0/150+0/12000 cap=50
+[28/30] b      q=800 r=2 query=799.95/s submit-p95=5.062581000061073ms fail=0/150+0/12000 cap=54
+[29/30] b      q=800 r=3 query=799.99/s submit-p95=3.2503360000646353ms fail=0/150+0/12000 cap=40
+[30/30] direct q=800 r=3 query=800.00/s submit-p95=3.2004200000983474ms fail=0/150+0/12000 cap=58
+Completed all 30 approved trials; no additional rates or tuning applied.

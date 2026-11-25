@@ -1,0 +1,36 @@
+{
+  "utc": "2026-11-25T08:05:44.323189+00:00",
+  "kernel": "5.15.167.4-microsoft-standard-WSL2",
+  "machine": "x86_64",
+  "os_release": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.7\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+  "cpu_model": "Intel(R) Core(TM) i5-8265U CPU @ 1.60GHz",
+  "visible_logical_cpus": 8,
+  "affinity_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "memory": {
+    "MemTotal_KiB": 7903252,
+    "MemAvailable_KiB": 7360928,
+    "SwapTotal_KiB": 2097152
+  },
+  "fd_soft_hard": [
+    1024,
+    1048576
+  ],
+  "python": "3.13.5",
+  "gcc": "gcc (Debian 14.2.0-19) 14.2.0",
+  "ephemeral_ports": "32768\t60999",
+  "tcp_tw_reuse": "2",
+  "load_average": [
+    0.0,
+    0.0,
+    0.0
+  ]
+}

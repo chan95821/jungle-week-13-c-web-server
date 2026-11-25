@@ -1,0 +1,24 @@
+{
+  "trial_count": 30,
+  "measured": {
+    "offered": 144000,
+    "started": 144000,
+    "success": 144000,
+    "failures": 0,
+    "timeout": 0,
+    "status_5xx": 0,
+    "generator_cap_rejections": 0,
+    "failure_categories": {}
+  },
+  "warmup": {
+    "offered": 28800,
+    "started": 28800,
+    "success": 28800,
+    "failures": 0,
+    "timeout": 0,
+    "status_5xx": 0,
+    "generator_cap_rejections": 0,
+    "failure_categories": {}
+  },
+  "fd_changes": []
+}

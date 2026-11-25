@@ -1,0 +1,12 @@
+﻿diff --git a/src/event_server.c b/src/event_server.c
+index f341289..f46bd12 100644
+--- a/src/event_server.c
++++ b/src/event_server.c
+@@ -32,6 +32,7 @@ static bool hand_client_to_worker(struct event_runtime *runtime,
+     return false;
+ }
+ 
++// accept4 : 새 클라이언트 FD를 얻는다.
+ static int accept_connections(int listener_fd, int signal_fd, struct event_runtime *runtime) {
+     unsigned int cursor = 0;
+     int64_t accept_retry_at = 0;

@@ -1,0 +1,213 @@
+{
+  "mode": "direct",
+  "query_rps": 400,
+  "repeat": 3,
+  "warmup": {
+    "duration_s": 3,
+    "elapsed_with_drain_s": 3,
+    "peak_inflight": 3,
+    "submit": {
+      "offered": 30,
+      "started": 30,
+      "success": 30,
+      "failures": 0,
+      "failure_pct": 0.0,
+      "success_rps": 10.0,
+      "success_in_window_rps": 10.0,
+      "scheduled_p95_ms": 2.571816999989096,
+      "network_p95_ms": 1.4213000000040665,
+      "dispatch_p95_ms": 1.414009999962218,
+      "delayed_over_1ms": 13,
+      "timeout": 0,
+      "generator_cap_rejections": 0,
+      "failure_categories": {},
+      "status_5xx": 0,
+      "backend_hits": {
+        "submission": 30
+      }
+    },
+    "query": {
+      "offered": 1200,
+      "started": 1200,
+      "success": 1200,
+      "failures": 0,
+      "failure_pct": 0.0,
+      "success_rps": 400.0,
+      "success_in_window_rps": 400.0,
+      "scheduled_p95_ms": 2.2096079999300855,
+      "network_p95_ms": 1.1602999999809072,
+      "dispatch_p95_ms": 1.2930189999451613,
+      "delayed_over_1ms": 376,
+      "timeout": 0,
+      "generator_cap_rejections": 0,
+      "failure_categories": {},
+      "status_5xx": 0,
+      "backend_hits": {
+        "query-a": 600,
+        "query-b": 600
+      }
+    },
+    "resources": {
+      "submission": {
+        "before": {
+          "rss_mib": 1.0703125,
+          "fds": 4
+        },
+        "sampled_peak": {
+          "rss_mib": 1.0703125,
+          "fds": 4
+        },
+        "after": {
+          "rss_mib": 1.0703125,
+          "fds": 4
+        }
+      },
+      "query-a": {
+        "before": {
+          "rss_mib": 1.01953125,
+          "fds": 4
+        },
+        "sampled_peak": {
+          "rss_mib": 1.01953125,
+          "fds": 4
+        },
+        "after": {
+          "rss_mib": 1.01953125,
+          "fds": 4
+        }
+      },
+      "query-b": {
+        "before": {
+          "rss_mib": 1.05859375,
+          "fds": 4
+        },
+        "sampled_peak": {
+          "rss_mib": 1.05859375,
+          "fds": 4
+        },
+        "after": {
+          "rss_mib": 1.05859375,
+          "fds": 4
+        }
+      },
+      "generator": {
+        "before": {
+          "rss_mib": 31.20703125,
+          "fds": 10
+        },
+        "sampled_peak": {
+          "rss_mib": 31.20703125,
+          "fds": 11
+        },
+        "after": {
+          "rss_mib": 31.20703125,
+          "fds": 10
+        }
+      }
+    }
+  },
+  "measured": {
+    "duration_s": 15,
+    "elapsed_with_drain_s": 15,
+    "peak_inflight": 5,
+    "submit": {
+      "offered": 150,
+      "started": 150,
+      "success": 150,
+      "failures": 0,
+      "failure_pct": 0.0,
+      "success_rps": 10.0,
+      "success_in_window_rps": 10.0,
+      "scheduled_p95_ms": 2.5498599999878024,
+      "network_p95_ms": 1.5712999999664135,
+      "dispatch_p95_ms": 1.4254700000151388,
+      "delayed_over_1ms": 60,
+      "timeout": 0,
+      "generator_cap_rejections": 0,
+      "failure_categories": {},
+      "status_5xx": 0,
+      "backend_hits": {
+        "submission": 150
+      }
+    },
+    "query": {
+      "offered": 6000,
+      "started": 6000,
+      "success": 6000,
+      "failures": 0,
+      "failure_pct": 0.0,
+      "success_rps": 400.0,
+      "success_in_window_rps": 400.0,
+      "scheduled_p95_ms": 2.284159999987878,
+      "network_p95_ms": 1.1923999999794432,
+      "dispatch_p95_ms": 1.3107990000094105,
+      "delayed_over_1ms": 1980,
+      "timeout": 0,
+      "generator_cap_rejections": 0,
+      "failure_categories": {},
+      "status_5xx": 0,
+      "backend_hits": {
+        "query-a": 3000,
+        "query-b": 3000
+      }
+    },
+    "resources": {
+      "submission": {
+        "before": {
+          "rss_mib": 1.0703125,
+          "fds": 4
+        },
+        "sampled_peak": {
+          "rss_mib": 1.0703125,
+          "fds": 4
+        },
+        "after": {
+          "rss_mib": 1.0703125,
+          "fds": 4
+        }
+      },
+      "query-a": {
+        "before": {
+          "rss_mib": 1.01953125,
+          "fds": 4
+        },
+        "sampled_peak": {
+          "rss_mib": 1.01953125,
+          "fds": 5
+        },
+        "after": {
+          "rss_mib": 1.01953125,
+          "fds": 4
+        }
+      },
+      "query-b": {
+        "before": {
+          "rss_mib": 1.05859375,
+          "fds": 4
+        },
+        "sampled_peak": {
+          "rss_mib": 1.05859375,
+          "fds": 4
+        },
+        "after": {
+          "rss_mib": 1.05859375,
+          "fds": 4
+        }
+      },
+      "generator": {
+        "before": {
+          "rss_mib": 31.16796875,
+          "fds": 10
+        },
+        "sampled_peak": {
+          "rss_mib": 31.16796875,
+          "fds": 11
+        },
+        "after": {
+          "rss_mib": 31.16796875,
+          "fds": 10
+        }
+      }
+    }
+  }
+}

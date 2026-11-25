@@ -1,5 +1,46 @@
 # B 구현을 요청 순서대로 읽기
 
+## 가독성 정리 후 먼저 볼 흐름
+
+현재 코드는 같은 동작을 유지하면서 긴 조율 함수를 기능별로 나눴다. 아래 함수들은 모두 프로젝트가 직접 구현한 함수다. `pthread_create`, `epoll_wait`, `recv`, `sendmsg` 등은 시스템/라이브러리 API다.
+
+메인에서는 스레드 준비·시작·종료가 분리되어 있다.
+
+~~~text
+run_event_server
+  → initialize_network_workers   : 작업자별 epoll/eventfd 준비
+  → start_local_work_pool        : 파일/CGI 보조 풀 시작
+  → start_network_workers        : 네트워크 스레드 시작
+  → accept_connections           : 메인이 수락·분배 반복
+  → stop_network_workers         : 종료 알림 후 join
+  → 보조 풀과 나머지 자원 정리
+~~~
+
+작업자의 한 바퀴는 `run_worker_event_loop`에서 읽는다.
+
+~~~text
+receive_worker_inbox             새 연결/보조 결과 받기
+process_ready_connections        메모리에서 바로 진행할 연결 처리
+collect_retired_connections      안전한 연결만 최종 해제
+expire_due_connections           기한 만료 처리
+epoll_wait                      다음 소켓/제어 알림 대기
+process_worker_events            각 연결 재개
+collect_retired_connections      배치가 끝난 뒤 해제
+~~~
+
+연결 하나는 `advance_connection`에서 종료·기한·budget을 확인하고, `advance_current_phase`로 현재 일을 진행한다. 클라이언트 출력은 `advance_client_output`이 담당하며, **모두 보낸 경우에만** `continue_after_client_output`이 다음 단계로 전환한다. 백엔드 데이터가 진행됐다는 결과 역시 유지하므로 메모리에 남은 헤더·본문을 다음 이벤트 없이 이어 처리한다.
+
+| 송신 결과 | 의미 | 다음 행동 |
+|---|---|---|
+| `SEND_FAILED` (-1) | 송신 오류 | 연결 정리 |
+| `SEND_WOULD_BLOCK` (0) | 지금 보낼 수 없음 | epoll 알림 대기 |
+| `SEND_FINISHED` (1) | 준비한 조각 전체 송신 | 다음 단계/producer로 이동 |
+| `SEND_CAN_CONTINUE` (2) | 부분 송신 또는 EINTR | 현재 송신 위치부터 재시도 |
+
+백엔드 처리는 `start_backend_request`의 주소 선택 → 버퍼 준비 → 접속으로 읽는다. 본문은 `read_backend_response_body`가 프레이밍을 고르고, `read_chunked_body`는 청크 단계, `read_backend_payload`는 실제 바이트 전달을 담당한다.
+
+보조 스레드는 `take_next_local_job` → `notify_local_queue_space` → `execute_local_job` → `publish_local_job_result`를 반복한다. 큐 lock은 수령/공개에만 사용하며 파일/CGI 실행 구간에는 잡지 않는다.
+
 ## 작업자, epoll, 이벤트 루프의 관계
 
 작업자는 pthread로 만든 **스레드**다. 이 프로젝트는 네트워크 작업자를 시작할 때 정해진 개수만 만들고 재사용한다. 요청마다 새 스레드를 만들지 않는다.

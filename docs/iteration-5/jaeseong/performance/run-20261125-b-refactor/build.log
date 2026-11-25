@@ -1,0 +1,42 @@
+mkdir -p build/obj/
+mkdir -p build/obj/
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/main.o src/main.c
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/server.o src/server.c
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/socket_io.o src/socket_io.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/http.o src/http.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/router.o src/router.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/proxy.o src/proxy.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/proxy_transfer.o src/proxy_transfer.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/proxy_io.o src/proxy_io.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/proxy_headers.o src/proxy_headers.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/proxy_body.o src/proxy_body.c
+mkdir -p build/obj/handlers/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/handlers/basic.o src/handlers/basic.c
+mkdir -p build/obj/handlers/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/handlers/static.o src/handlers/static.c
+mkdir -p build/obj/handlers/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/handlers/greet.o src/handlers/greet.c
+mkdir -p build/obj/handlers/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/handlers/cgi.o src/handlers/cgi.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/event_server.o src/event_server.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/event_worker.o src/event_worker.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/event_connection.o src/event_connection.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/event_proxy.o src/event_proxy.c
+mkdir -p build/obj/
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -c -o build/obj/local_work.o src/local_work.c
+mkdir -p cgi-bin
+gcc -std=c11 -Wall -Wextra -Werror -O2 -o build/test_backend tests/backends/server.c src/socket_io.c src/http.c
+gcc -std=c11 -Wall -Wextra -Werror -O2 -o cgi-bin/order cgi-src/order.c
+gcc -std=c11 -Wall -Wextra -Werror -O2 -pthread -o build/server build/obj/main.o build/obj/server.o build/obj/socket_io.o build/obj/http.o build/obj/router.o build/obj/proxy.o build/obj/proxy_transfer.o build/obj/proxy_io.o build/obj/proxy_headers.o build/obj/proxy_body.o build/obj/handlers/basic.o build/obj/handlers/static.o build/obj/handlers/greet.o build/obj/handlers/cgi.o build/obj/event_server.o build/obj/event_worker.o build/obj/event_connection.o build/obj/event_proxy.o build/obj/local_work.o

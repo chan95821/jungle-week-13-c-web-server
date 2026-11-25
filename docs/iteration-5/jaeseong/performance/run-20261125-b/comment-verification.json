@@ -1,0 +1,44 @@
+{
+  "all_c_tokens_equal": true,
+  "compared_files": [
+    "src/event_connection.c",
+    "src/event_internal.h",
+    "src/event_proxy.c",
+    "src/event_server.c",
+    "src/event_server.h",
+    "src/event_worker.c",
+    "src/handlers/basic.c",
+    "src/handlers/cgi.c",
+    "src/handlers/greet.c",
+    "src/handlers/handlers.h",
+    "src/handlers/static.c",
+    "src/http.c",
+    "src/http.h",
+    "src/local_work.c",
+    "src/main.c",
+    "src/proxy.c",
+    "src/proxy.h",
+    "src/proxy_body.c",
+    "src/proxy_headers.c",
+    "src/proxy_internal.h",
+    "src/proxy_io.c",
+    "src/proxy_transfer.c",
+    "src/router.c",
+    "src/router.h",
+    "src/server.c",
+    "src/server.h",
+    "src/socket_io.c",
+    "src/socket_io.h"
+  ],
+  "binary_hashes": {
+    "server": {
+      "measured": "b83078d733b92dc62c05e408cef5a1efc41a39c9c5513524e62c0dea22500113",
+      "current": "b83078d733b92dc62c05e408cef5a1efc41a39c9c5513524e62c0dea22500113"
+    },
+    "test_backend": {
+      "measured": "ebd1765f80847700495659007186bffbd39af47b1fc8262c78ee099ec74fa0fe",
+      "current": "ebd1765f80847700495659007186bffbd39af47b1fc8262c78ee099ec74fa0fe"
+    }
+  },
+  "binaries_identical": true
+}

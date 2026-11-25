@@ -1,0 +1,13 @@
+{
+  "successful": 144000,
+  "failed": 0,
+  "warmup_failed": 141,
+  "generator_cap_rejections": 0,
+  "fd_changes": [],
+  "b_q800_query_rps_median": 799.9910253273487,
+  "b_q800_submit_p95_ms_median": 3.1484650000948022,
+  "b_peak_proxy_rss_mib": 5.12109375,
+  "b_peak_proxy_fds": 17,
+  "b_peak_inflight": 42,
+  "warmup_cap_rejections": 141
+}
