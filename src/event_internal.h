@@ -77,6 +77,7 @@ struct event_worker {
     struct accepted_client accepted[ACCEPT_QUEUE_CAPACITY];
     size_t accept_head, accept_count;
     struct local_job *completed_head, *completed_tail;
+    struct local_job *waiting_head, *waiting_tail;
     atomic_size_t reserved; /* 큐 + 살아 있는 연결. 관리자는 이 숫자만 읽는다. */
     atomic_bool stopping;
     bool shutdown_started;
@@ -138,6 +139,7 @@ void notify_event_fd(int fd);
 int start_local_work_pool(struct local_work_pool *pool);
 void stop_local_work_pool(struct local_work_pool *pool);
 bool submit_local_job(struct event_connection *connection, enum local_job_kind kind);
+void submit_waiting_local_jobs(struct event_worker *worker);
 void complete_local_job(struct event_connection *connection);
 
 int initialize_event_worker(struct event_worker *worker, struct event_runtime *runtime);
