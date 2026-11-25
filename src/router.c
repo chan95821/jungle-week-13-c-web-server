@@ -101,17 +101,21 @@ struct route_rule {
     const char *method;
     enum route_match match;
     router_handler route_handler_func;
+    enum proxy_route proxy_route;
 };
 
 static const struct route_rule routes[] = {
-    {"/", "GET", ROUTE_EXACT, prepare_hello},
-    {"/hello", "GET", ROUTE_EXACT, prepare_hello},
-    {"/echo", "POST", ROUTE_EXACT, prepare_echo},
-    {"/cafe", "GET", ROUTE_EXACT, prepare_cafe},
-    {"/menu", "GET", ROUTE_EXACT, prepare_menu},
-    {"/assets/", "GET", ROUTE_PREFIX, prepare_assets},
-    {"/greet", "GET", ROUTE_EXACT, prepare_greet},
-    {"/cgi-bin/", "GET", ROUTE_PREFIX, prepare_cgi},
+    {"/", "GET", ROUTE_EXACT, prepare_hello, PROXY_ROUTE_LOCAL},
+    {"/hello", "GET", ROUTE_EXACT, prepare_hello, PROXY_ROUTE_LOCAL},
+    {"/echo", "POST", ROUTE_EXACT, prepare_echo, PROXY_ROUTE_LOCAL},
+    {"/cafe", "GET", ROUTE_EXACT, prepare_cafe, PROXY_ROUTE_LOCAL},
+    {"/menu", "GET", ROUTE_EXACT, prepare_menu, PROXY_ROUTE_LOCAL},
+    {"/assets/", "GET", ROUTE_PREFIX, prepare_assets, PROXY_ROUTE_LOCAL},
+    {"/greet", "GET", ROUTE_EXACT, prepare_greet, PROXY_ROUTE_LOCAL},
+    {"/cgi-bin/", "GET", ROUTE_PREFIX, prepare_cgi, PROXY_ROUTE_LOCAL},
+    {"/api/submissions", "POST", ROUTE_EXACT, NULL, PROXY_ROUTE_SUBMISSIONS},
+    {"/api/submission-status", "GET", ROUTE_EXACT, NULL, PROXY_ROUTE_QUERY},
+    {"/api/hello", "GET", ROUTE_EXACT, NULL, PROXY_ROUTE_QUERY},
 };
 
 /* Return true when path starts with the literal prefix rule. */
@@ -168,12 +172,17 @@ static int select_rule(const struct http_request *r,
     return 405;
 }
 
-int http_select_handler(const struct http_request *request,
-                        router_handler *route_handler_func, const char **allow) {
-    const struct route_rule *selected;
-    int status = select_rule(request, &selected, allow);
-    *route_handler_func = status ? NULL : selected->route_handler_func;
-    return status;
+int http_select_route(const struct http_request *request,
+                      struct request_route *selected, const char **allow) {
+    *selected = (struct request_route){.proxy_route = PROXY_ROUTE_LOCAL};
+    const struct route_rule *rule;
+    int status = select_rule(request, &rule, allow);
+    if (status) return status;
+    *selected = (struct request_route){
+        .local_handler = rule->route_handler_func,
+        .proxy_route = rule->proxy_route
+    };
+    return 0;
 }
 
 void router_prepare_error(struct router_response *response, int status,

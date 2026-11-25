@@ -64,6 +64,62 @@ static void test_config(const char *path) {
     assert(proxy_load_config(NULL, &config) == -1);
 }
 
+static void test_route_table(void) {
+    static const struct {
+        const char *path, *method;
+        enum proxy_route destination;
+    } rules[] = {
+        {"/", "GET", PROXY_ROUTE_LOCAL}, {"/hello", "GET", PROXY_ROUTE_LOCAL},
+        {"/echo", "POST", PROXY_ROUTE_LOCAL}, {"/cafe", "GET", PROXY_ROUTE_LOCAL},
+        {"/menu", "GET", PROXY_ROUTE_LOCAL}, {"/assets/a.css", "GET", PROXY_ROUTE_LOCAL},
+        {"/assets/", "GET", PROXY_ROUTE_LOCAL}, {"/greet", "GET", PROXY_ROUTE_LOCAL},
+        {"/cgi-bin/order", "GET", PROXY_ROUTE_LOCAL},
+        {"/cgi-bin/", "GET", PROXY_ROUTE_LOCAL},
+        {"/api/submissions", "POST", PROXY_ROUTE_SUBMISSIONS},
+        {"/api/submission-status", "GET", PROXY_ROUTE_QUERY},
+        {"/api/hello", "GET", PROXY_ROUTE_QUERY}
+    };
+    static const char *methods[] = {"GET", "POST", "HEAD", "OPTIONS", "get"};
+    for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); ++i) {
+        for (size_t m = 0; m < sizeof(methods) / sizeof(methods[0]); ++m) {
+            struct http_request request = {
+                .method = slice(methods[m]), .path = slice(rules[i].path),
+                .target = slice("/unchanged?name=%20"),
+                .headers = slice("Connection: Host\r\n")
+            };
+            struct request_route selected;
+            const char *allow;
+            bool implemented = m < 2;
+            int expected = !implemented ? 501 :
+                strcmp(methods[m], rules[i].method) == 0 ? 0 : 405;
+            assert(http_select_route(&request, &selected, &allow) == expected);
+            if (!expected) {
+                assert(selected.proxy_route == rules[i].destination);
+                assert((selected.local_handler != NULL) == (rules[i].destination == PROXY_ROUTE_LOCAL));
+                assert(allow == NULL);
+            } else {
+                assert(selected.local_handler == NULL && selected.proxy_route == PROXY_ROUTE_LOCAL);
+                assert(expected == 405 ? strcmp(allow, rules[i].method) == 0 : allow == NULL);
+            }
+            assert(http_slice_equal(request.target, "/unchanged?name=%20"));
+            assert(http_slice_equal(request.headers, "Connection: Host\r\n"));
+        }
+    }
+    static const char *unknown[] = {
+        "/api/hello/", "/api/hello-extra", "/api/submissions-extra", "/api/unknown",
+        "/assets", "/assets-extra/a.css", "/cgi-bin", "/cgi-bin-extra/order", "/hello/", "/missing"
+    };
+    for (size_t i = 0; i < sizeof(unknown) / sizeof(unknown[0]); ++i) {
+        for (size_t m = 0; m < 3; ++m) {
+            struct http_request request = {.method = slice(methods[m]), .path = slice(unknown[i])};
+            struct request_route selected;
+            const char *allow;
+            assert(http_select_route(&request, &selected, &allow) == (m < 2 ? 404 : 501));
+            assert(!selected.local_handler && selected.proxy_route == PROXY_ROUTE_LOCAL && !allow);
+        }
+    }
+}
+
 static void test_routes_and_selection(void) {
     struct proxy_config config = {
         .submission_backend = {.sin_port = htons(8001)},
@@ -71,56 +127,83 @@ static void test_routes_and_selection(void) {
     };
     struct proxy_selection_state selection = {0}, independent_selection = {0};
     struct http_request request = {
-        .method = slice("GET"),
-        .path = slice("/api/submission-status"),
+        .method = slice("GET"), .path = slice("/api/submission-status"),
         .target = slice("/api/submission-status?id=7")
     };
     struct http_slice original_target = request.target;
+    struct request_route selected;
     const char *allow;
-    enum proxy_route route;
-    assert(proxy_match_request(&request, &route, &allow) == 0);
-    assert(route == PROXY_ROUTE_QUERY && allow == NULL);
-    assert(proxy_select_backend(&config, &selection, route) == &config.query_backends[0]);
+    assert(http_select_route(&request, &selected, &allow) == 0);
+    assert(selected.proxy_route == PROXY_ROUTE_QUERY && !selected.local_handler && !allow);
+    assert(selection.next_query_backend == 0); /* Matching does not select/advance. */
+    assert(proxy_select_backend(&config, &selection, selected.proxy_route) == &config.query_backends[0]);
+    request.method = slice("POST"); request.path = slice("/api/submissions");
+    assert(http_select_route(&request, &selected, &allow) == 0);
+    assert(proxy_select_backend(&config, &selection, selected.proxy_route) == &config.submission_backend);
     assert(selection.next_query_backend == 1);
-
-    request.method = slice("POST");
-    request.path = slice("/api/submissions");
-    assert(proxy_match_request(&request, &route, &allow) == 0);
-    assert(route == PROXY_ROUTE_SUBMISSIONS);
-    assert(proxy_select_backend(&config, &selection, route) == &config.submission_backend);
+    request.method = slice("GET"); request.path = slice("/api/hello");
+    assert(http_select_route(&request, &selected, &allow) == 0);
+    assert(proxy_select_backend(&config, &selection, selected.proxy_route) == &config.query_backends[1]);
+    assert(proxy_select_backend(&config, &selection, selected.proxy_route) == &config.query_backends[0]);
+    assert(proxy_select_backend(&config, &independent_selection, selected.proxy_route) == &config.query_backends[0]);
+    assert(request.target.data == original_target.data && request.target.length == original_target.length);
+    request.path = slice("/hello");
+    assert(http_select_route(&request, &selected, &allow) == 0 && selected.local_handler);
+    assert(proxy_select_backend(&config, &selection, selected.proxy_route) == NULL);
     assert(selection.next_query_backend == 1);
+}
 
-    request.method = slice("GET");
-    request.path = slice("/api/hello");
-    assert(proxy_match_request(&request, &route, &allow) == 0);
-    assert(proxy_select_backend(&config, &selection, route) == &config.query_backends[1]);
-    assert(proxy_select_backend(&config, &selection, route) == &config.query_backends[0]);
-    assert(proxy_select_backend(&config, &independent_selection, route) ==
-           &config.query_backends[0]);
-    assert(request.target.data == original_target.data);
-    assert(request.target.length == original_target.length);
-
-    request.method = slice("POST");
-    assert(proxy_match_request(&request, &route, &allow) == 405);
-    assert(strcmp(allow, "GET") == 0 && route == PROXY_ROUTE_LOCAL);
-    request.method = slice("GET");
-    request.path = slice("/api/submissions");
-    assert(proxy_match_request(&request, &route, &allow) == 405);
-    assert(strcmp(allow, "POST") == 0);
-    request.method = slice("HEAD");
-    assert(proxy_match_request(&request, &route, &allow) == 501);
-
-    static const char *local_paths[] = {
-        "/", "/hello", "/echo", "/assets/a.css", "/greet", "/api/hello/",
-        "/api/submissions-extra", "/api/unknown"
+static void test_protected_connection_options(void) {
+    static const struct { const char *method, *path; } routes[] = {
+        {"POST", "/api/submissions"}, {"GET", "/api/submission-status"},
+        {"GET", "/api/hello"}
     };
-    for (size_t i = 0; i < sizeof(local_paths) / sizeof(local_paths[0]); ++i) {
-        request.path = slice(local_paths[i]);
-        assert(proxy_match_request(&request, &route, &allow) == 0);
-        assert(route == PROXY_ROUTE_LOCAL && allow == NULL);
-        assert(proxy_select_backend(&config, &selection, route) == NULL);
+    static const struct { const char *headers; int status; } cases[] = {
+        {"Connection: Host\r\n", 400},
+        {"cOnNeCtIoN:\tHoSt \t\r\n", 400},
+        {"Connection: X-Hop, CONTENT-LENGTH, close\r\n", 400},
+        {"Connection: transfer-encoding\r\n", 400},
+        {"Connection: X-Hop\r\nConnection: close, Host\r\n", 400},
+        {"Connection: close,\tTransfer-Encoding \t\r\n", 400},
+        {"Connection: X-Host, Content-Length-X, X-Transfer-Encoding\r\n", 0},
+        {"Connection: X-Hop, close\r\n", 0},
+        {"", 0}
+    };
+    for (size_t r = 0; r < sizeof(routes) / sizeof(routes[0]); ++r) {
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+            char header[512], original[512];
+            int length = snprintf(header, sizeof(header),
+                "%s %s HTTP/1.1\r\nHost: original.example\r\n"
+                "Content-Length: 10\r\nExpect: 100-continue\r\n%s\r\n",
+                routes[r].method, routes[r].path, cases[i].headers);
+            assert(length > 0 && (size_t)length < sizeof(header));
+            memcpy(original, header, (size_t)length);
+            struct http_request request;
+            assert(http_parse_request((const unsigned char *)header,
+                                       (size_t)length, &request) == 0);
+            struct request_route selected;
+            const char *allow;
+            assert(http_select_route(&request, &selected, &allow) == 0);
+            assert(allow == NULL && selected.local_handler == NULL);
+            assert(selected.proxy_route == (r == 0 ? PROXY_ROUTE_SUBMISSIONS : PROXY_ROUTE_QUERY));
+            assert(proxy_validate_request(&request) == cases[i].status);
+            assert(memcmp(header, original, (size_t)length) == 0);
+        }
     }
-    assert(selection.next_query_backend == 1);
+
+    struct http_request local = {
+        .method = slice("GET"), .path = slice("/hello"),
+        .headers = slice("Connection: Host\r\n")
+    };
+    struct request_route selected;
+    const char *allow;
+    assert(http_select_route(&local, &selected, &allow) == 0);
+    assert(selected.proxy_route == PROXY_ROUTE_LOCAL && selected.local_handler && !allow);
+    local.path = slice("/api/submissions");
+    assert(http_select_route(&local, &selected, &allow) == 405);
+    assert(strcmp(allow, "POST") == 0);
+    local.method = slice("HEAD");
+    assert(http_select_route(&local, &selected, &allow) == 501);
 }
 
 int main(void) {
@@ -130,7 +213,9 @@ int main(void) {
     assert(close(fd) == 0);
     test_config(path);
     assert(unlink(path) == 0);
+    test_route_table();
     test_routes_and_selection();
+    test_protected_connection_options();
     puts("[PASS] proxy config, method routing and round-robin selection");
     return 0;
 }

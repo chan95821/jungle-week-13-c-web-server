@@ -6,12 +6,6 @@
 #include <signal.h>
 #include <netinet/in.h>
 
-enum proxy_route {
-    PROXY_ROUTE_LOCAL,
-    PROXY_ROUTE_SUBMISSIONS,
-    PROXY_ROUTE_QUERY
-};
-
 /* Caller-owned immutable configuration; no allocations or open FDs inside. */
 struct proxy_config {
     struct sockaddr_in submission_backend;
@@ -26,10 +20,9 @@ struct proxy_selection_state {
 /* Read all three roles from a file. On failure, preserve config and set errno. */
 int proxy_load_config(const char *path, struct proxy_config *config);
 
-/* Return 0 and a route, or 405/501 with Allow where applicable.
- * Other paths remain LOCAL for the existing router. Does not change request. */
-int proxy_match_request(const struct http_request *request,
-                        enum proxy_route *route, const char **allow);
+/* Call only after successfully selecting a proxy route, before body/100/backend I/O.
+ * Return 400 for protected Connection nominations, otherwise 0. No I/O/state changes. */
+int proxy_validate_request(const struct http_request *request);
 
 /* Borrow an endpoint from config; NULL for LOCAL/invalid route.
  * Advance QUERY's turn immediately, independently of subsequent connection success.
@@ -47,7 +40,8 @@ enum {
     PROXY_STREAM_BYTES = 16 * 1024
 };
 /* Prepare backend stream or a local 500/502/504 response. Takes no request ownership.
- * On success response's provider owns the backend FD and all proxy buffers. */
+ * On success response's provider owns backend FD and all retained proxy buffers.
+ * wire_header must be sent before the first next_func call, which releases it. */
 void proxy_prepare_response(const struct sockaddr_in *backend,
                             const struct http_request *request,
                             const volatile sig_atomic_t *running,

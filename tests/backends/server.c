@@ -16,6 +16,7 @@ static volatile sig_atomic_t backend_running = 1;
 static void stop_backend(int signal_number) { (void)signal_number; backend_running = 0; }
 static void handle_backend_request(int, const char *, const char *);
 static void pause_backend(int);
+static void pause_backend_milliseconds(long);
 static bool find_request_field(const struct http_request *, const char *, struct http_slice *);
 
 int main(int argc, char **argv) {
@@ -86,15 +87,75 @@ static void handle_backend_request(int client, const char *identity, const char 
     }
     request.body = (struct http_slice){body, request.content_length};
     io.deadline = NULL;
+    if (!strcmp(mode, "notify-silent")) {
+        fputs("request-received\n", stderr);
+        fflush(stderr);
+        pause_backend(3);
+        goto cleanup;
+    }
+    if (!strcmp(mode, "delayed-header")) pause_backend(2);
+    if (!strcmp(mode, "partial-header")) {
+        static const char partial[] = "HTTP/1.1 200 OK\r\nX-Partial: ";
+        if (send_all_with_deadline(client, partial, sizeof(partial) - 1, &io) == 0)
+            pause_backend(3);
+        goto cleanup;
+    }
+    if (!strcmp(mode, "slow-header")) {
+        static const char wire[] = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+        for (size_t offset = 0; offset < sizeof(wire) - 1 && backend_running; offset += 4) {
+            size_t count = sizeof(wire) - 1 - offset;
+            if (count > 4) count = 4;
+            if (send_all_with_deadline(client, wire + offset, count, &io) < 0) break;
+            pause_backend_milliseconds(400);
+        }
+        goto cleanup;
+    }
+    if (!strcmp(mode, "slow-body")) {
+        static const char header[] =
+            "HTTP/1.1 201 Created\r\nContent-Type: application/octet-stream\r\n"
+            "Content-Length: 2000\r\n\r\n";
+        unsigned char chunk[250];
+        memset(chunk, 'S', sizeof(chunk));
+        if (send_all_with_deadline(client, header, sizeof(header) - 1, &io) < 0)
+            goto cleanup;
+        for (size_t offset = 0; offset < 2000 && backend_running; offset += sizeof(chunk)) {
+            if (send_all_with_deadline(client, chunk, sizeof(chunk), &io) < 0) break;
+            if (offset + sizeof(chunk) < 2000) pause_backend_milliseconds(300);
+        }
+        goto cleanup;
+    }
     if (!strcmp(mode, "silent")) { pause_backend(3); goto cleanup; }
     if (!strcmp(mode, "reset")) {
         struct linger reset = {.l_onoff = 1, .l_linger = 0};
         (void)setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset));
         goto cleanup;
     }
-    if (!strcmp(mode, "http10")) {
-        static const char wire[] = "HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n";
-        (void)send_all_with_deadline(client, wire, sizeof(wire) - 1, &io);
+    static const struct {
+        const char *mode;
+        const char *header;
+        const void *body;
+        size_t length;
+    } legacy_responses[] = {
+        {"http10", "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\n",
+         "hello", sizeof("hello") - 1},
+        {"http10-close", "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n",
+         "close\0body", sizeof("close\0body") - 1},
+        {"http10-truncate", "HTTP/1.0 200 OK\r\nContent-Length: 10\r\n\r\n",
+         "short", sizeof("short") - 1},
+        {"http10-custom", "HTTP/1.0 409 Legacy conflict\r\nContent-Length: 8\r\n\r\n",
+         "conflict", sizeof("conflict") - 1},
+        {"http10-no-content", "HTTP/1.0 204 No Content\r\n\r\n", "", 0},
+        {"http10-not-modified", "HTTP/1.0 304 Not Modified\r\nContent-Length: 123\r\n\r\n", "", 0},
+        {"http10-informational", "HTTP/1.0 103 Early Hints\r\n\r\n", "", 0},
+        {"http10-te", "HTTP/1.0 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+         "0\r\n\r\n", sizeof("0\r\n\r\n") - 1}
+    };
+    for (size_t i = 0; i < sizeof(legacy_responses) / sizeof(legacy_responses[0]); ++i) {
+        if (strcmp(mode, legacy_responses[i].mode)) continue;
+        if (send_all_with_deadline(client, legacy_responses[i].header,
+                                   strlen(legacy_responses[i].header), &io) == 0)
+            (void)send_all_with_deadline(client, legacy_responses[i].body,
+                                         legacy_responses[i].length, &io);
         goto cleanup;
     }
     if (!strcmp(mode, "bad-length")) {
@@ -159,8 +220,16 @@ static void handle_backend_request(int client, const char *identity, const char 
         http_slice_equal(request.path, "/api/hello") ? hello : status_body;
     size_t response_length = submission ? request.body.length :
         http_slice_equal(request.path, "/api/hello") ? sizeof(hello) - 1 : sizeof(status_body) - 1;
+    unsigned char benchmark_body[1024];
+    if (!strcmp(mode, "benchmark") && !submission && correct_route) {
+        for (size_t i = 0; i < sizeof(benchmark_body); ++i) benchmark_body[i] = (unsigned char)i;
+        response_body = benchmark_body;
+        response_length = sizeof(benchmark_body);
+    }
     if (!correct_route) { response_body = (const unsigned char *)"wrong backend"; response_length = 13; }
     struct http_slice content_type = {0}, trace = {0}, hop = {0}, expectation = {0};
+    struct http_slice received_length = {(const unsigned char *)"absent", sizeof("absent") - 1};
+    (void)find_request_field(&request, "content-length", &received_length);
     (void)find_request_field(&request, "content-type", &content_type);
     (void)find_request_field(&request, "x-trace", &trace);
     bool has_hop = find_request_field(&request, "x-hop", &hop);
@@ -170,6 +239,7 @@ static void handle_backend_request(int client, const char *identity, const char 
         "HTTP/1.1 %s\r\nContent-Type: application/octet-stream\r\n"
         "Content-Length: %zu\r\nX-Backend-ID: %s\r\n"
         "X-Received-Host: %.*s\r\nX-Received-Target: %.*s\r\n"
+        "X-Received-Content-Length: %.*s\r\n"
         "X-Received-Content-Type: %.*s\r\nX-Received-Trace: %.*s\r\n"
         "X-Received-Hop: %s\r\nX-Received-Expect: %s\r\n"
         "Set-Cookie: a=1\r\nSet-Cookie: b=2\r\n"
@@ -177,6 +247,7 @@ static void handle_backend_request(int client, const char *identity, const char 
         !correct_route ? "404 Not Found" : submission ? "201 Created" : "200 OK",
         response_length, identity, (int)request.host.length, request.host.data,
         (int)request.target.length, request.target.data,
+        (int)received_length.length, received_length.data,
         (int)content_type.length, content_type.length ? content_type.data : (const unsigned char *)"",
         (int)trace.length, trace.length ? trace.data : (const unsigned char *)"",
         has_hop ? "present" : "absent", has_expect ? "present" : "absent");
@@ -188,7 +259,14 @@ cleanup:
 }
 
 static void pause_backend(int seconds) {
-    struct timespec delay = {.tv_sec = seconds};
+    pause_backend_milliseconds((long)seconds * 1000);
+}
+
+static void pause_backend_milliseconds(long milliseconds) {
+    struct timespec delay = {
+        .tv_sec = milliseconds / 1000,
+        .tv_nsec = (milliseconds % 1000) * 1000000L
+    };
     while (backend_running && nanosleep(&delay, &delay) < 0 && errno == EINTR) {}
 }
 

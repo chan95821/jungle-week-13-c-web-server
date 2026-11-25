@@ -90,3 +90,61 @@
 제외: 부하·성능 측정, 동시 연결 1만 개 실험, 광범위한 퍼징/경합, 실제 운영 ACL 보증, 모든 메모리 할당·시스템 호출 실패 조합과 연결 타임아웃 네트워크 장애 주입. 연결 거절과 응답 시간 초과를 연결 완료 기한 검증으로 확대하지 않는다.
 
 make test / make verify를 사용자 승인 후 실행하고 통과·실패·skip·미검증으로 보고한다. 서버 E2E 바이너리는 일반 -O2이며 단위 sanitizer 검사와 구분한다.
+
+## P0-2 보완 검증 완료 (2026-11-25)
+
+- 기존 Host 재작성·설정 파일 필수·HTTP/1.1 전용·기한·소유권·분배 정책 유지. C2/C14/C7은 현재 확정 계약과의 차이로 분리한다.
+- 새 Connection 보호 필드 조기 400만 구현했다. 본문 전용 처리·100 Continue·백엔드 접속 전 차단이며 일반 지명 헤더·로컬 경로·기존 오류 우선순위를 유지한다.
+- make clean 및 make all 성공. make test 단위 7개 ASan/UBSan 통과, make verify E2E 5개 통과. 최종 실패/skip 없음. 성능·외부 교차 스위트 전체는 미측정/미실행.
+- 새 E2E는 첫 응답 400·100 미송신·백엔드 접속 0건과 정상 회귀를 확인했다. 상세 결과: docs/iteration-4/Snoopykid/iteration-4-p02-verification-results.md.
+- 사용자 설정 예시는 clean·빌드 전후 해시 동일. main 머지·커밋·푸시는 하지 않았다. 이후 제안도 .md의 기존 결정과 실제 변경을 구분한다.
+
+## P1-4 HTTP/1.0 응답 수용 완료 (2026-11-25)
+
+- 사용자 승인으로 백엔드 HTTP/1.0 응답을 추가 수용하고 클라이언트 상태 줄은 HTTP/1.1로 구성한다. 상태 코드·문구·본문은 보존한다. 클라이언트와 백엔드 요청은 기존 HTTP/1.1이다.
+- 고정 길이/EOF·204/304·커스텀 문구·조기 종료 및 1.0의 잘못된 1xx/TE를 단위·C 백엔드 E2E로 검증했다.
+- make clean·make all 성공. ASan/UBSan 단위 7개와 E2E 5개 통과, 실패/skip 없음.
+- P0-2, Host·CLI·타임아웃·소유권은 유지한다. 다른 P1/P2 보완은 이번 작업에 포함하지 않았다.
+- 성능·부하·외부 교차 스위트 전체는 재실행하지 않았고 머지·커밋·푸시하지 않았다.
+- 상세 기록: docs/iteration-4/Snoopykid/iteration-4-http10-verification-results.md. 이전 HTTP/1.1 전용 및 C7 계약 차이 기록은 변경 이전 이력이다.
+
+## P1-6 헤더 보완 완료 (2026-11-25)
+
+- 본문·원래 CL이 없는 GET의 CL: 0 합성을 생략하고 명시적 길이·POST 길이 정책은 유지했다.
+- 중간 1xx에는 close를 생성하지 않으며 Via·전달 헤더·최종 응답의 close는 유지했다.
+- clean·빌드 성공, ASan/UBSan 단위 7개 및 E2E 5개 통과. 최종 실패/skip 없음.
+- 실제 socketpair 송신과 C 백엔드 수신, 103/최종 200 분리 검사 및 기존 P0-2·HTTP/1.0·기한·FD 회귀를 확인했다.
+- 성능·외부 교차 스위트 전체는 재측정하지 않았고 머지·커밋·푸시하지 않았다. 다른 구조·메모리 보완은 포함하지 않았다.
+- 상세 결과: docs/iteration-4/Snoopykid/iteration-4-p16-verification-results.md. 이전 P1-4 보고서의 P1-6 미변경 설명은 당시 이력이다.
+## P1-7 엣지 검증 통합 완료 (2026-11-25)
+
+- make verify-edge를 추가하고 make verify에도 포함했다. 테스트용 C 백엔드를 재사용하며 제품 src/ 17개 파일은 이번 작업 전후 해시가 같다.
+- clean·컴파일/링크 성공, ASan/UBSan 단위 7개와 E2E 스크립트 6개 성공. 신규 E01~E34 및 C2/C3/C7/C12/C13/C14 대응 6개, 총 40개 통과·실패 0·skip 0.
+- Host 재작성·설정 필수 및 기존 기한을 유지해 계약 차이를 분리했다. 기능 기한만 검증했고 성능 측정은 하지 않았다.
+- 상세 범위·한계·로그: docs/iteration-4/Snoopykid/iteration-4-p17-verification-results.md. 머지·커밋·푸시는 수행하지 않았다.
+
+## P2-B 완료 (2026-11-25)
+
+- proxy_transfer 조율 + proxy_io/proxy_headers/proxy_body와 내부 헤더로 분리했다. raw_header·재구성 공간은 준비 단계 지역 공간, 송신 헤더·최종 chunked Connection 필드·실제 트레일러는 필요한 길이만 소유한다.
+- 첫 body next에서 송신 헤더를 회수하고, 그 전에 끝나거나 실패하면 cleanup이 회수한다. 트레일러 검사에 필요한 지명 정보는 복사해 지역 헤더를 참조하지 않는다. 기존 동작·기한·FD 책임은 유지한다.
+- clean·컴파일/링크 성공. ASan/UBSan 단위 8개와 E2E 스크립트 6개 통과, 엣지 40개 통과·실패 0·skip 0. 수명 테스트 추가 보강도 통과했다.
+- 제품에는 새 가변 전역/주입 훅을 추가하지 않았다. 메모리 수치는 코드상 공간 설명만 기록하며 CPU/RSS/처리량·성능은 측정하지 않았다. 동시성/라우팅 확장·머지·커밋·푸시는 포함하지 않았다.
+- 실제 흐름: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md. 상세 결과/한계/로그: docs/iteration-4/Snoopykid/iteration-4-p2-verification-results.md.
+
+## P2-9 A안 완료 — 라우팅 일원화 (2026-11-25)
+
+- 로컬 8개·프록시 3개 경로/메서드를 router.c 단일 routes[]와 http_select_route로 모았다. 결과는 request_route의 local_handler/proxy_route다.
+- handle_client에서 파서 → 라우터 → 프록시만 proxy_validate_request → 본문/100 → 기존 로컬 실행/백엔드 선택·중계 순서를 유지한다. 이전 중복 판별 함수는 제거했다.
+- 오류/Allow·보호 검사 범위·선택 순번·입력·소유권·기한·버퍼 수명을 유지했다. IPv6·가변 백엔드·정책 콜백·동시성은 추가하지 않았다.
+- clean·컴파일/링크 성공, ASan/UBSan 단위 8개와 E2E 스크립트 6개 통과. edge40 통과·실패 0·skip 0. 추가 오류 우선순위 11개는 기존 E2E 내부 검사로 포함했다.
+- 사용자 설정 해시 동일, 잔류 테스트 프로세스 없음. 성능/부하·외부 교차 전체·다른 OS 검증 및 머지·커밋·푸시는 하지 않았다.
+- 현재 흐름: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md. 상세 결과: docs/iteration-4/Snoopykid/iteration-4-routing-verification-results.md.
+
+## Iteration 4 승인 성능 재측정 완료 (2026-11-25)
+
+- f32e17d와 현재 소스를 격리 -O2 빌드하고 동일 C 백엔드1KiB·C 부하 생성기로 직접 기준선/S1~S6/S_MAX를 측정했다. 조건별5초 워밍업/3회, 총48회 모두 완료했다.
+- 검증된 성공응답 165,929건, 실패/5xx/워밍업 실패0건. 고정률 예정 건수 미달0, 측정 전후 FD증가0. 양쪽 S1 품질 상한 통과.
+- 포화 조회 중앙값 전 3920.8 → 후 3859.9req/s (-1.55%). 3회 변동 범위가 겹쳐 확정적 개선/저하를 단정하지 않는다.
+- 현재 WSL/공통 C 도구에서 보완 전체 묶음을 비교한 결과다. 외부 Linux/Go 보고서의4937req/s 유지 여부나 P2만의 인과 효과로 표현하지 않는다. CPU·RSS·직접접속 추가지연·A/B분산도 보고서/원시자료에 기록했다.
+- 사용자 설정 SHA256 동일, 현재 제품 src/Makefile이 측정 스냅샷과 동일하며 server/test_backend/load_client 잔류 프로세스가 없다. 서버 정책/최적화·추가 측정·머지·커밋·푸시는 하지 않았다.
+- 상세: docs/iteration-4/Snoopykid/iteration-4-performance-results.md. 보존할 원시 텍스트/CSV/지문: 같은 폴더 performance/. 실행 바이너리와 전체 로그는 build/performance/에만 보존한다.

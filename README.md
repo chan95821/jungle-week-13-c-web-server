@@ -58,10 +58,12 @@ curl --noproxy '*' -i http://127.0.0.1:8080/hello
 조회는 선택 직후 순번을 넘기며 실패해도 같은 요청을 다른 서버에 자동 재시도하지 않는다. 제출 요청은 조회 순번을 소비하지 않는다. 경로·쿼리 바이트는 재작성하지 않는다.
 
 - 클라이언트: 기존 HTTP/1.1 origin-form, GET/POST, 요청 줄·헤더 8KiB, 본문 64KiB, 엄격한 Content-Length 정책을 유지한다. 요청 chunked·absolute-form·keep-alive는 추가하지 않는다. HEAD는 기존 501과 본문 생략 정책이다.
-- 백엔드: 평문 HTTP/1.1만 받는다. HTTP/1.0·101 Upgrade·잘못된 프레이밍은 502다. 완전한 HTTP/1.1 구현을 표방하지 않는다.
+- 백엔드 응답: 평문 HTTP/1.0·1.1을 수용하고 클라이언트 상태 줄은 HTTP/1.1로 구성한다. 상태 코드·상태 문구는 보존한다. HTTP/1.0의 1xx/Transfer-Encoding, 101 Upgrade·잘못된 프레이밍은 502다. 클라이언트 요청과 백엔드로 보내는 요청은 HTTP/1.1을 유지하며 완전한 HTTP 구현을 표방하지 않는다.
 - 백엔드 응답은 Content-Length, chunked, 연결 종료 프레이밍을 지원한다. 다른 Transfer-Encoding 체인은 거절한다.
 - 상태·전달 대상 헤더·중복 필드·바이너리 본문을 보존한다. Host는 백엔드 주소로 바꾸고 Via를 추가한다. hop-by-hop 및 Connection에서 지명한 필드는 제거한다.
-- Expect: 100-continue는 프록시에서 처리하고 백엔드로 재전달하지 않는다. 다른 1xx는 출력 헤더 공간 안에 보관해 최종 헤더 검증 후 전달한다.
+- 프록시 경로에서 Connection이 Host·Content-Length·Transfer-Encoding을 지목하면 본문 추가 수신·100 Continue·백엔드 연결 전에 400으로 거절한다. 일반 지명 헤더 제거와 로컬 경로 정책은 유지한다.
+- 백엔드 요청 생성 시 본문과 원래 길이 필드가 없는 GET에는 Content-Length: 0을 합성하지 않는다. 명시적 GET 길이와 빈 POST의 0바이트 길이는 유지한다.
+- Expect: 100-continue는 프록시에서 처리하고 백엔드로 재전달하지 않는다. 다른 1xx는 출력 헤더 공간 안에 보관해 최종 헤더 검증 후 전달한다. 중간 응답에는 Connection: close를 생성하지 않고 최종 응답에만 생성한다.
 - chunked 응답의 청크 확장은 해석하고 재생성하지 않으며, 유효한 전달 대상 트레일러는 보존한다. 잘못되거나 금지된 트레일러는 불완전 응답으로 종료한다.
 - 최종 응답 송신을 시도한 뒤 오류가 발생하면 기록·정리만 한다. 새 HTTP 오류를 붙이지 않고 chunked의 정상 종료 청크도 생략한다.
 - 인증·세션·토큰·권한 관리, 캐싱, 여러 프록시는 추가하지 않는다.
@@ -80,13 +82,13 @@ curl --noproxy '*' -i http://127.0.0.1:8080/hello
 
 수치는 표준 권고값·최적값이 아니다. 응답 본문 수신 기한은 최종 헤더 검증 뒤 시작하고 수신 진행으로 늘리지 않는다. 클라이언트에 마지막 바이트가 도달할 때까지의 전체 완료 기한을 보장하는 것은 아니다. 기존 클라이언트 송신 호출 제한은 유지한다.
 
-main이 설정·조회 순번·리스너·클라이언트 FD를 소유한다. handle_client가 요청 헤더·요청 본문을 소유한다. 프록시 응답 상태는 백엔드 FD·응답 헤더·16KiB 스트림 버퍼·트레일러 공간을 소유하며 provider cleanup에서 해제한다. 준비 실패 시 준비 함수가 회수한다.
+main이 설정·조회 순번·리스너·클라이언트 FD를 소유한다. handle_client가 요청 헤더·요청 본문을 소유한다. 프록시 응답 상태는 백엔드 FD·16KiB 수신 버퍼와 필요한 길이만 할당한 송신 헤더·Connection 필드·트레일러를 소유한다. 원본 헤더와 재구성 작업 공간은 헤더 준비 함수의 지역 공간이다. 송신 헤더는 첫 본문 next에서 회수하고, 그 외 정상·실패 경로는 provider cleanup이 회수한다. 준비 실패 시 준비 함수가 회수한다.
 
 16KiB는 스트림 버퍼 용량이다. 헤더·트레일러·요청 본문과 구조체 공간이 추가되므로 연결 전체 메모리와 같지 않다. 응답 헤더/청크 메타데이터는 기존 8KiB 상한을 재사용하며, 출력 헤더 공간은 필드 재구성과 Via 등을 위해 그 상한에서 유도한다.
 
 ## 컴파일과 공식 검증
 
-이 작업에서는 서버·C 테스트 백엔드·7개 단위 테스트를 컴파일·링크하고 Python 스크립트의 구문을 확인한다. 공식 테스트·부하·성능 측정은 별도 범위 확정 전에는 실행하지 않는다. sanitizer로 컴파일한 사실은 검사 통과가 아니다.
+2026-11-25 P2-9 A안 라우팅 일원화 후 clean·컴파일/링크 성공, 단위 8개(ASan/UBSan)와 E2E 스크립트 6개를 통과했다. 엣지 40개 통과·실패 0·skip 0이며 전체 최종 실패·skip도 없었다. 기존 정책과 오류 우선순위를 유지했다. 최신 상세 기록은 docs/iteration-4/Snoopykid/iteration-4-routing-verification-results.md다. 이전 보완 보고서는 당시 기록으로 보존한다. 기능 검증 이후 사용자 승인 조건의 보완 전후 성능48회를 별도로 완료했다. 외부 교차 스위트 전체는 재실행하지 않았다.
 
 ~~~sh
 # 아래 두 명령은 사용자와 검증 범위를 확정한 후 실행한다.
@@ -94,15 +96,22 @@ make test
 make verify
 ~~~
 
-make test: test_parse_port, test_recv_header, test_send_all, test_http_parser, test_body_send, test_proxy_selection, test_proxy_protocol (ASan/UBSan).
+make test: test_parse_port, test_recv_header, test_send_all, test_http_parser, test_body_send, test_proxy_selection, test_proxy_protocol, test_proxy_lifecycle (ASan/UBSan). 수명 테스트는 별도 build/test-obj 객체에서만 할당 함수를 대체하며 서버에는 주입 코드를 넣지 않는다.
 
-make verify: Iteration 1·2·3 정적·3 동적 회귀와 Iteration 4 C 백엔드 중계 검증. 테스트는 임시 설정·정적 fixture·임시 포트를 사용한다. 사용자 설정 파일과 실제 운영 권한은 바꾸지 않는다.
+make verify: Iteration 1·2·3 정적·3 동적 회귀와 Iteration 4 C 백엔드 중계 및 엣지 40개 검증. make verify-edge로 엣지 스크립트만 실행할 수도 있다. 테스트는 임시 설정·정적 fixture·임시 포트를 사용한다. 사용자 설정 파일과 실제 운영 권한은 바꾸지 않는다.
 
 빌드 산출물은 build/이며 C CGI 바이너리는 기존 cgi-bin/을 사용한다. 둘 다 Git에서 제외한다. make clean은 명시한 바이너리·객체만 지우며 build/proxy.conf.example과 build/legacy/는 유지한다.
 
+
+## 승인 성능 재측정 결과
+
+2026-11-25 동일 WSL에서 f32e17d와 현재 스냅샷을 공통 C 백엔드/1KiB 응답/-O2로 비교했다. 직접 기준선과 S1~S6/S_MAX, 조건별3회로 총48회를 완료했다. 성공165,929건, 실패·5xx0건, S1 양쪽 통과, 예정 요청 건수 미달·FD증가0이다.
+
+포화 조회 처리량 중앙값은3,920.8→3,859.9req/s(-1.55%)로 관측됐으며 최소~최대 범위가 겹친다. 기존 외부 Linux/Go의4,937req/s와 직접 비교하거나 확정적인 성능 개선/저하로 해석하지 않는다. CPU·RSS·p50/p95·조건/한계는 [성능 보고서](docs/iteration-4/Snoopykid/iteration-4-performance-results.md), 반복별 데이터는 [CSV](docs/iteration-4/Snoopykid/performance/trials.csv)에 있다. 성능 결과에 따른 자동 최적화는 하지 않았다.
+
 ## 코드 흐름과 후속 범위
 
-- src/main.c → src/server.c의 handle_client → src/proxy.c의 설정·목적지·분배 → src/proxy_transfer.c의 연결·요청·응답 준비 → 기존 provider 송신·정리.
+- src/main.c → src/server.c의 handle_client → src/router.c의 단일 경로/메서드 판별 → src/proxy.c의 보호 헤더 검사·설정·백엔드 분배 → src/proxy_transfer.c의 조율 → proxy_io.c의 연결/수신과 proxy_headers.c의 요청/응답 헤더 준비 → proxy_body.c의 본문 제공 → 기존 송신·정리.
 - 상세 리뷰: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md.
 - 선택·검증 후보: docs/iteration-4/Snoopykid/iteration-4-requirements.md, iteration-4-tests.md.
 - 순차 처리이므로 조회 A/B 분배가 동시 처리 효과를 보장하지 않는다.

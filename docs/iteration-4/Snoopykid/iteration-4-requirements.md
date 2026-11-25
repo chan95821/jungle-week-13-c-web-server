@@ -97,3 +97,138 @@ C 백엔드 재사용의 진입점·역할 설정·응답 계약·장애 재현 
 - 서버·C 백엔드·7개 ASan/UBSan 단위 테스트의 컴파일·링크 성공. 6개 Python 보조/검증 파일 구문 컴파일 성공. 공식 테스트·서버/백엔드 실행·성능 측정은 하지 않았다.
 - make -n verify clean으로 예정 명령만 확인했다. clean은 사용자 설정 예시를 삭제하지 않는다. build/server·build/test_backend·build/proxy.conf.example의 Git 무시를 확인했다.
 - 공식 검증 후보는 단위 7개 + E2E 5개다. 검증 실행은 사용자 범위 확정 전이며 성능 실험은 별도 허락 대상이다. 커밋·푸시하지 않았다.
+
+## 핸드오프 검토 후 확정 — P0-2만 변경 (2026-11-25)
+
+기준 커밋: f32e17d, 작업 브랜치 Iteration4/Proxy-YYJ. 기존 결정과 새 변경을 구분한다.
+
+| 항목 | 확정 상태 | 처리 |
+| --- | --- | --- |
+| P0-1 Host | 기존 결정 유지 | 선택한 백엔드 IPv4:port로 재작성한다. 원본 Host를 요구하는 C2는 현재 계약과의 차이다. 구체적인 팀 요구가 생기면 변경안으로 검토한다. |
+| P0-2 Connection 보호 필드 | 새 오류 정책 채택 | 유효하게 파싱·라우팅된 프록시 요청에서 Host, Content-Length, Transfer-Encoding을 Connection 옵션이 지명하면 400으로 거절한다. 본문 할당·추가 수신, 100 Continue, 백엔드 선택·연결 전에 판정한다. |
+| P0-3 CLI | 기존 결정 유지 | 설정 파일 인자가 필수다. 설정 없는 실행, 내장 기본 백엔드, 기존 회귀 스크립트의 CLI 변경 원복은 추가하지 않는다. C14의 단독 포트 실행 기대는 현재 계약과의 차이다. |
+| HTTP/1.0 | 기존 결정 유지 | HTTP/1.1 전용이다. C7은 지원 범위 차이이며 자동 수용하지 않는다. |
+| 타임아웃·소유권·분배 | 기존 결정 유지 | 이미 확정한 임시값·수명·Round-Robin을 변경하지 않는다. |
+
+프록시의 기존 구문/길이 파싱과 메서드 오류 우선순위는 유지한다. 그 뒤 보호 필드 검사가 통과해야 프록시 경로를 확정한다. 로컬 경로는 이 새 오류 정책을 적용하지 않는다. Connection 옵션은 전체 토큰 기준·대소문자 무시로 검사하고, 모든 Connection 줄을 순회한다. 일반 지명 헤더 제거는 기존대로다.
+
+여기서 본문 수신 전은 본문 전용 할당·추가 수신 단계 이전을 뜻한다. 헤더 recv에 동반 도착한 바이트나 종료 시 기존 제한적 수신 폐기까지 없어진다고 주장하지 않는다.
+
+P1/P2도 기존 .md 확정 기록을 먼저 확인한다. 외부 교차 테스트와 정책 차이를 구현 결함으로 일괄 분류하지 않고 실제 변경이 필요한 사항만 설명·합의한다. main 머지·커밋·푸시·성능 재측정은 하지 않는다.
+
+## P0-2 보완 검증 완료 (2026-11-25)
+
+- 기존 Host 재작성·설정 파일 필수·HTTP/1.1 전용·기한·소유권·분배 정책 유지. C2/C14/C7은 현재 확정 계약과의 차이로 분리한다.
+- 새 Connection 보호 필드 조기 400만 구현했다. 본문 전용 처리·100 Continue·백엔드 접속 전 차단이며 일반 지명 헤더·로컬 경로·기존 오류 우선순위를 유지한다.
+- make clean 및 make all 성공. make test 단위 7개 ASan/UBSan 통과, make verify E2E 5개 통과. 최종 실패/skip 없음. 성능·외부 교차 스위트 전체는 미측정/미실행.
+- 새 E2E는 첫 응답 400·100 미송신·백엔드 접속 0건과 정상 회귀를 확인했다. 상세 결과: docs/iteration-4/Snoopykid/iteration-4-p02-verification-results.md.
+- 사용자 설정 예시는 clean·빌드 전후 해시 동일. main 머지·커밋·푸시는 하지 않았다. 이후 제안도 .md의 기존 결정과 실제 변경을 구분한다.
+
+## P1-4 변경 승인 — 백엔드 HTTP/1.0 응답 수용 (2026-11-25)
+
+사용자가 백엔드 HTTP/1.0 수용·클라이언트 HTTP/1.1 승격 범위의 진행을 승인했다. 이 기록은 이전 HTTP/1.1 전용 결정 중 백엔드 응답 범위만 변경한다. 과거 C7의 502는 당시 계약에 맞는 결과였으며 과거 기록을 구현 결함으로 소급 변경하지 않는다.
+
+- 클라이언트 요청과 백엔드로 전달하는 요청은 HTTP/1.1을 유지한다.
+- 백엔드 응답은 HTTP/1.0·HTTP/1.1만 수용하고 클라이언트 상태 줄은 HTTP/1.1로 구성한다. 상태 코드와 상태 문구는 그대로 보존한다.
+- HTTP/1.0의 Content-Length 응답은 정확한 바이트 수를 중계한다. 길이 없는 정상 EOF 응답은 기존 chunked 전송기를 재사용한다.
+- HTTP/1.0에서 1xx 또는 Transfer-Encoding을 사용한 응답은 잘못된/지원 밖 조합으로 502 거절한다. 중복 CL·CL+TE·잘못된 버전·조기 EOF 및 기존 204/304 검증은 유지한다.
+- 연결·버퍼·FD 소유권, 헤더 상한, 16KiB 스트림, Host 재작성, 필수 설정 파일, 타임아웃·Round-Robin·P0-2 보호 헤더 검사는 변경하지 않는다.
+- GET의 CL: 0 합성, HTTP/1.1 1xx의 Connection: close, 모듈 분리·메모리 수명 변경 등 다른 P1/P2 제안은 이번 작업에 포함하지 않는다.
+
+## P1-4 HTTP/1.0 응답 수용 완료 (2026-11-25)
+
+- 사용자 승인으로 백엔드 HTTP/1.0 응답을 추가 수용하고 클라이언트 상태 줄은 HTTP/1.1로 구성한다. 상태 코드·문구·본문은 보존한다. 클라이언트와 백엔드 요청은 기존 HTTP/1.1이다.
+- 고정 길이/EOF·204/304·커스텀 문구·조기 종료 및 1.0의 잘못된 1xx/TE를 단위·C 백엔드 E2E로 검증했다.
+- make clean·make all 성공. ASan/UBSan 단위 7개와 E2E 5개 통과, 실패/skip 없음.
+- P0-2, Host·CLI·타임아웃·소유권은 유지한다. 다른 P1/P2 보완은 이번 작업에 포함하지 않았다.
+- 성능·부하·외부 교차 스위트 전체는 재실행하지 않았고 머지·커밋·푸시하지 않았다.
+- 상세 기록: docs/iteration-4/Snoopykid/iteration-4-http10-verification-results.md. 이전 HTTP/1.1 전용 및 C7 계약 차이 기록은 변경 이전 이력이다.
+
+## P1-6 진행 — 요청 길이와 중간 응답 헤더 생성 (2026-11-25)
+
+사용자의 다음 작업 진행 지시에 따라 핸드오프 P1-6의 두 항목만 보완한다.
+
+- 본문도 원래 Content-Length도 없는 GET에는 Content-Length: 0을 합성하지 않는다. 명시한 CL=0 및 본문이 있는 GET은 정확한 길이를 유지한다.
+- POST는 원래 길이 필드가 없어도 기존 빈 본문 계약에 맞춰 Content-Length: 0을 생성한다. 본문이 있는 요청의 바이트 경계는 그대로다.
+- HTTP/1.1 1xx 중간 응답에는 Connection: close를 생성하지 않는다. 기존 hop-by-hop 제거와 Via, 상태·전달 헤더는 유지한다. 최종 응답에는 Connection: close를 유지한다.
+- main → handle_client → forward_request_to_backend의 길이 필드 생성 조건과 receive_backend_response_headers → build_client_response_headers의 close 생성 조건만 바꾼다.
+- HTTP/1.0 백엔드 수용, P0-2, Host 재작성, 설정 필수·기한·FD/버퍼 소유권·분배·청크/트레일러는 유지한다. 파일 분리·메모리 수명 변경·성능 최적화는 이번 범위가 아니다.
+
+## P1-6 헤더 보완 완료 (2026-11-25)
+
+- 본문·원래 CL이 없는 GET의 CL: 0 합성을 생략하고 명시적 길이·POST 길이 정책은 유지했다.
+- 중간 1xx에는 close를 생성하지 않으며 Via·전달 헤더·최종 응답의 close는 유지했다.
+- clean·빌드 성공, ASan/UBSan 단위 7개 및 E2E 5개 통과. 최종 실패/skip 없음.
+- 실제 socketpair 송신과 C 백엔드 수신, 103/최종 200 분리 검사 및 기존 P0-2·HTTP/1.0·기한·FD 회귀를 확인했다.
+- 성능·외부 교차 스위트 전체는 재측정하지 않았고 머지·커밋·푸시하지 않았다. 다른 구조·메모리 보완은 포함하지 않았다.
+- 상세 결과: docs/iteration-4/Snoopykid/iteration-4-p16-verification-results.md. 이전 P1-4 보고서의 P1-6 미변경 설명은 당시 이력이다.
+
+## P1-7 진행 — 에지 스위트 흡수 (2026-11-25)
+
+- 참고 eda192c:scripts/verify_edge_cases.py의 34개 검증 아이디어를 현재 계약으로 이식한다. Python mock/RawBackend, 선택적 CLI, 3초 헤더·1초 본문 idle 기대값은 가져오지 않는다.
+- 기존 C 백엔드 fixture와 Iteration 4 프로세스·요청 helper를 재사용한다. 느린 본문·지연/부분/slow-drip 헤더·요청 수신 알림은 테스트 C 코드에서만 제공한다.
+- E01~E34 기본 사례와 C2/C3/C7/C12/C13/C14 대응 검증 6개를 make verify-edge로 제공하고 make verify에도 포함한다.
+- C2는 기존 Host 재작성 계약, C14는 필수 설정 계약을 검증한다. 외부 원본 기대값 차이를 현재 구현 결함으로 분류하거나 외부 교차 스위트 전체 통과로 표기하지 않는다.
+- 지연 헤더 2초는 현재 1초 기한에 따라 504다. 본문 idle은 5초를 유지한다. 느리지만 진행하는 본문은 현재 idle/전체 기한 안에서 정상 완료해야 한다.
+- C12는 0.4초 간격 C 백엔드 헤더가 전체 1초를 연장하지 않는지 확인한다. C13은 C 백엔드 수신 알림을 확인한 후 SIGTERM으로 종료해 헤더 timeout을 기다리지 않는지 검증한다.
+- 시간은 기능 기한·실패 판정에만 사용한다. 요청별 지연 통계·처리량·CPU/RSS 등 성능 지표는 수집하지 않는다.
+- 제품 src 코드는 이번 범위에서 변경하지 않는다. 파일 분리·메모리/정책 최적화도 추가하지 않는다. 테스트에서 새로운 제품 문제가 발견되면 원인과 수정안을 별도 보고한다.
+## P1-7 엣지 검증 통합 완료 (2026-11-25)
+
+- make verify-edge를 추가하고 make verify에도 포함했다. 테스트용 C 백엔드를 재사용하며 제품 src/ 17개 파일은 이번 작업 전후 해시가 같다.
+- clean·컴파일/링크 성공, ASan/UBSan 단위 7개와 E2E 스크립트 6개 성공. 신규 E01~E34 및 C2/C3/C7/C12/C13/C14 대응 6개, 총 40개 통과·실패 0·skip 0.
+- Host 재작성·설정 필수 및 기존 기한을 유지해 계약 차이를 분리했다. 기능 기한만 검증했고 성능 측정은 하지 않았다.
+- 상세 범위·한계·로그: docs/iteration-4/Snoopykid/iteration-4-p17-verification-results.md. 머지·커밋·푸시는 수행하지 않았다.
+## P2-B 구현 경계 및 검증 기준 (2026-11-25)
+
+사용자가 파일 분리와 메모리 수명 개선을 함께 하는 B안을 선택했다.
+
+흐름: main → handle_client → proxy_prepare_response → connect_backend → forward_request_to_backend → prepare_backend_response_headers → send_prepared_response → read_backend_body_chunk → cleanup_backend_response.
+
+- proxy_transfer.c는 준비·실패 정리를 조율한다. proxy_io.c는 연결/기한/수신, proxy_headers.c는 요청 송신·응답 헤더 준비, proxy_body.c는 본문/청크/트레일러를 맡는다. 내부 구조와 모듈 간 함수는 proxy_internal.h로 제한한다.
+- 스트림에는 기존 16KiB 수신 배열을 유지한다. raw_header 8KiB와 재구성 client_header 16,640바이트는 헤더 준비의 지역 작업 공간으로 옮긴다. 지역 공간도 메모리를 사용하며, 향후 작업자 스택 예산 검토가 필요하다.
+- 최종/중간 응답을 포함한 송신 헤더는 완성 길이만 한 번 할당·복사한다. provider가 소유하고 첫 next 호출(송신 함수가 헤더 송신 완료 후 호출)에서 해제한다. 본문 없는 경우나 헤더 송신 실패로 next가 호출되지 않으면 cleanup이 해제한다. wire_header 참조는 첫 next/cleanup까지 유효하다.
+- 최종 chunked 응답의 Connection 필드만 원문 필드 줄로 별도 보존해 헤더 작업 공간 종료 후에도 기존 트레일러 거절 정책을 유지한다. 필드 없는 경우 할당하지 않는다. 응답 헤더 전체나 파싱 slice를 지역 공간 밖에 빌려 두지 않는다.
+- 트레일러는 기존 8KiB 상한의 지역 공간에서 검사 후, 비어 있지 않을 때 정확한 길이만 할당한다. 본문 전 할당 실패는 기존 500, 본문 처리 중 실패는 BODY_ERROR로 연결을 닫고 새 오류 응답/종료 청크를 붙이지 않는다.
+- 백엔드 FD는 준비 중 조율 함수, 성공 후 provider가 소유한다. client FD·요청 본문 소유권, Host 재작성·필수 설정·HTTP 버전·라우팅·타임아웃·상한은 유지한다. 이벤트 루프·동시성·새 콜백·성능 측정은 추가하지 않는다.
+
+검증 후보/통과 기준:
+- 기존 make test(ASan/UBSan), make verify 6개 스크립트/edge 40개 회귀 통과.
+- 헤더 작업 공간 종료 후 상태/본문/Connection 지명 정보 정상 사용; 다중 Connection·대소문자·지명 트레일러 거절 유지.
+- 헤더 송신 후 첫 next에서 출력 헤더 회수; 본문 없음/헤더 송신 실패의 cleanup 경로 회수.
+- 준비 단계 state/Connection/출력 헤더 및 본문 단계 트레일러 할당 실패 주입, FD 정리와 할당 수명 확인.
+- chunked·EOF·CL·1xx·204/304·HTTP/1.0·바이너리·불완전 응답 회귀, 오류 후 서버 생존/FD 확인.
+- 컴파일·링크와 실행 검증은 별도로 보고한다. 성능·RSS·1만 연결 실험은 제외한다.
+
+## P2-B 완료 (2026-11-25)
+
+- proxy_transfer 조율 + proxy_io/proxy_headers/proxy_body와 내부 헤더로 분리했다. raw_header·재구성 공간은 준비 단계 지역 공간, 송신 헤더·최종 chunked Connection 필드·실제 트레일러는 필요한 길이만 소유한다.
+- 첫 body next에서 송신 헤더를 회수하고, 그 전에 끝나거나 실패하면 cleanup이 회수한다. 트레일러 검사에 필요한 지명 정보는 복사해 지역 헤더를 참조하지 않는다. 기존 동작·기한·FD 책임은 유지한다.
+- clean·컴파일/링크 성공. ASan/UBSan 단위 8개와 E2E 스크립트 6개 통과, 엣지 40개 통과·실패 0·skip 0. 수명 테스트 추가 보강도 통과했다.
+- 제품에는 새 가변 전역/주입 훅을 추가하지 않았다. 메모리 수치는 코드상 공간 설명만 기록하며 CPU/RSS/처리량·성능은 측정하지 않았다. 동시성/라우팅 확장·머지·커밋·푸시는 포함하지 않았다.
+- 실제 흐름: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md. 상세 결과/한계/로그: docs/iteration-4/Snoopykid/iteration-4-p2-verification-results.md.
+## P2-9 A안 — 라우팅 판별 일원화 구현 전 기준 (2026-11-25)
+
+사용자가 A안을 선택했다. 로컬/프록시의 경로·메서드는 router.c의 단일 routes[]에서 판별한다. IPv6·가변 백엔드·정책 콜백·설정 변경·동시성은 추가하지 않는다.
+
+흐름: main → handle_client → http_parse_request → http_select_route → 프록시인 경우 proxy_validate_request → 본문 할당/100 Continue/수신 → 기존 로컬 handler 또는 proxy_select_backend/proxy_prepare_response → 송신/정리.
+
+- http_select_route는 선택 결과에 로컬 handler 또는 프록시 목적지 역할을 담는다. 라우팅 역할 enum은 router.h로 이동하고 proxy.h는 이를 사용한다. 기존 http_select_handler/proxy_match_request의 중복 판별 진입점은 제거한다. 테스트도 새 진입점을 사용한다.
+- proxy_validate_request는 기존 보호 Connection 필드 검사만 담당한다. 경로·메서드를 다시 검사하거나 I/O·할당·선택 순번 변경을 하지 않는다. server가 라우팅 성공한 프록시 요청에만 호출한다.
+- 기존 정확 일치/접두사와 최장 일치, GET/POST 외 501, 미등록 GET/POST 404, 등록 경로의 잘못된 GET/POST 405·Allow, 이후 보호 필드 400 순서를 유지한다. 보호 필드가 있어도 로컬 요청에 프록시 검사를 적용하지 않는다.
+- 헤더 파서의 오류/413/431은 라우터보다 먼저 결정한다. 본문·100·백엔드 접속보다 라우팅/보호 검사가 앞선다. A/B 순번은 본문 완료 후 기존 선택 지점에서만 바뀐다.
+
+검증 기준:
+- 전체 로컬 8개/프록시 3개 경로의 목적지·메서드·Allow, 정확 경로와 접두사 경계, /api/hello/·/api/submissions-extra·미등록 경로, 미지원 메서드 501을 표 기반 단위 테스트로 확인한다.
+- 실패 결과는 handler=NULL/LOCAL로 초기화하고 입력 target·headers 및 선택 순번은 변경하지 않는다. 검사만으로 handler를 실행하거나 메모리·FD를 확보하지 않는다.
+- 보호 헤더와 잘못된 메서드·미등록 경로 조합의 405/501/404 우선순위, 정상 로컬 경로 통과, 정상 프록시의 조기 400/100 미송신/백엔드 접속0 회귀를 확인한다.
+- clean·컴파일/링크와 make test(ASan/UBSan), make verify(6개 E2E/edge40)를 구분해 보고한다. 성능 측정·머지·커밋·푸시는 제외한다.
+
+## P2-9 A안 완료 — 라우팅 일원화 (2026-11-25)
+
+- 로컬 8개·프록시 3개 경로/메서드를 router.c 단일 routes[]와 http_select_route로 모았다. 결과는 request_route의 local_handler/proxy_route다.
+- handle_client에서 파서 → 라우터 → 프록시만 proxy_validate_request → 본문/100 → 기존 로컬 실행/백엔드 선택·중계 순서를 유지한다. 이전 중복 판별 함수는 제거했다.
+- 오류/Allow·보호 검사 범위·선택 순번·입력·소유권·기한·버퍼 수명을 유지했다. IPv6·가변 백엔드·정책 콜백·동시성은 추가하지 않았다.
+- clean·컴파일/링크 성공, ASan/UBSan 단위 8개와 E2E 스크립트 6개 통과. edge40 통과·실패 0·skip 0. 추가 오류 우선순위 11개는 기존 E2E 내부 검사로 포함했다.
+- 사용자 설정 해시 동일, 잔류 테스트 프로세스 없음. 성능/부하·외부 교차 전체·다른 OS 검증 및 머지·커밋·푸시는 하지 않았다.
+- 현재 흐름: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md. 상세 결과: docs/iteration-4/Snoopykid/iteration-4-routing-verification-results.md.

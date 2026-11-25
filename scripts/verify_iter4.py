@@ -60,10 +60,11 @@ def header_values(headers, name):
 
 
 def request_wire(port, target=b"/api/submission-status", method=b"GET", body=b"",
-                 headers=b"", timeout=8, fragments=False):
+                 headers=b"", timeout=8, fragments=False, include_content_length=True):
+    length_header = (b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                     if include_content_length else b"")
     head = (method + b" " + target + b" HTTP/1.1\r\nHost: original.example\r\n"
-            + b"Content-Length: " + str(len(body)).encode() + b"\r\n"
-            + headers + b"Connection: close\r\n\r\n")
+            + length_header + headers + b"Connection: close\r\n\r\n")
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as client:
         client.settimeout(timeout)
         if fragments:
@@ -127,12 +128,134 @@ class Fixture:
         return len(list(directory.iterdir())) if directory.is_dir() else None
 
 
+def reject_protected_header(port, method, target, connection_lines):
+    # Send headers only and leave the write side open until the final rejection.
+    # A broken implementation that sends 100 or waits for the body must fail.
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as client:
+        client.sendall(
+            method + b" " + target + b" HTTP/1.1\r\nHost: original.example\r\n"
+            b"Content-Length: 10\r\nExpect: 100-continue\r\n"
+            + connection_lines + b"\r\n")
+        wire = bytearray()
+        while b"\r\n\r\n" not in wire:
+            chunk = client.recv(4096)
+            assert chunk, "EOF before rejection headers"
+            wire.extend(chunk)
+        assert wire.startswith(b"HTTP/1.1 400 "), bytes(wire)
+        client.shutdown(socket.SHUT_WR)
+        wire.extend(receive_to_eof(client))
+        assert b"HTTP/1.1 100 " not in wire
+        assert parse_response(bytes(wire))[0] == 400
+
+
+def verify_routing_error_priority(port):
+    # No body: routing/framing errors must win before 100 Continue or body reads.
+    cases = [
+        (b"GET", b"/api/submissions", 405, "POST", b"Content-Length: 10\r\n"),
+        (b"POST", b"/api/submission-status", 405, "GET", b"Content-Length: 10\r\n"),
+        (b"POST", b"/api/hello", 405, "GET", b"Content-Length: 10\r\n"),
+        (b"POST", b"/hello", 405, "GET", b"Content-Length: 10\r\n"),
+        (b"HEAD", b"/api/hello", 501, None, b"Content-Length: 10\r\n"),
+        (b"PUT", b"/api/submissions", 501, None, b"Content-Length: 10\r\n"),
+        (b"GET", b"/api/hello/", 404, None, b"Content-Length: 10\r\n"),
+        (b"POST", b"/api/submissions-extra", 404, None, b"Content-Length: 10\r\n"),
+        (b"HEAD", b"/missing", 501, None, b"Content-Length: 10\r\n"),
+        (b"GET", b"/api/submissions", 413, None, b"Content-Length: 65537\r\n"),
+        (b"GET", b"/api/submissions", 400, None, b"Content-Length: invalid\r\n"),
+    ]
+    for method, target, expected, allow, length_header in cases:
+        with socket.create_connection(("127.0.0.1", port), timeout=4) as client:
+            client.sendall(method + b" " + target + b" HTTP/1.1\r\nHost: test\r\n" +
+                           length_header + b"Expect: 100-continue\r\nConnection: Host\r\n\r\n")
+            client.shutdown(socket.SHUT_WR)
+            wire = receive_to_eof(client)
+        assert wire.startswith(f"HTTP/1.1 {expected} ".encode("ascii")), wire
+        assert b"HTTP/1.1 100 " not in wire
+        status, headers, _ = parse_response(wire, method.decode("ascii"))
+        assert status == expected
+        assert header_values(headers, "Allow") == ([] if allow is None else [allow])
+
+
+def verify_protected_connection_options(fixture):
+    cases = [
+        (method, target, b"Connection: " + name + b"\r\n")
+        for method, target in (
+            (b"POST", b"/api/submissions"),
+            (b"GET", b"/api/submission-status"),
+            (b"GET", b"/api/hello"))
+        for name in (b"Host", b"Content-Length", b"Transfer-Encoding")
+    ]
+    cases += [
+        (b"POST", b"/api/submissions",
+         b"cOnNeCtIoN:\tX-Hop, HoSt \t\r\n"),
+        (b"POST", b"/api/submissions",
+         b"Connection: X-Hop\r\nConnection: close, TRANSFER-ENCODING\r\n"),
+    ]
+    for method, target, lines in cases:
+        reject_protected_header(fixture.proxy_port, method, target, lines)
+    status, _, body = parse_response(request_wire(
+        fixture.proxy_port, b"/hello", headers=b"Connection: Host\r\n"))
+    assert status == 200 and body == b"Hello"
+
+    # Passive connection detectors only: these sockets never serve HTTP.
+    with ExitStack() as sockets:
+        traps = []
+        for _ in range(3):
+            trap = sockets.enter_context(socket.socket())
+            trap.bind(("127.0.0.1", 0))
+            trap.listen()
+            trap.setblocking(False)
+            traps.append(trap)
+        config = fixture.directory / "protected-fields.conf"
+        config.write_text("".join(
+            f"{role} 127.0.0.1:{trap.getsockname()[1]}\n"
+            for role, trap in zip(("submission", "query-a", "query-b"), traps)),
+            encoding="ascii")
+        proxy_port = pick_free_port()
+        proxy = fixture.start([str(SERVER), str(proxy_port), str(config)], proxy_port)
+        try:
+            verify_routing_error_priority(proxy_port)
+            for method, target, lines in cases:
+                reject_protected_header(proxy_port, method, target, lines)
+            for trap in traps:
+                try:
+                    connection, _ = trap.accept()
+                except BlockingIOError:
+                    continue
+                connection.close()
+                raise AssertionError("rejected request reached a backend")
+            assert proxy.poll() is None
+        finally:
+            stop_child(proxy)
+    print("[PASS] routing error priority and protected Connection -> early rejection without backend; local routes intact")
+
+
+def verify_request_length_headers(port):
+    cases = [
+        (b"GET", b"/api/submission-status", b"", False, "absent"),
+        (b"GET", b"/api/submission-status", b"", True, "0"),
+        (b"GET", b"/api/submission-status", b"a\0b", True, "3"),
+        (b"POST", b"/api/submissions", b"", False, "0"),
+        (b"POST", b"/api/submissions", b"", True, "0"),
+        (b"POST", b"/api/submissions", b"a\0b", True, "3"),
+    ]
+    for method, target, payload, include_length, expected in cases:
+        status, headers, body = parse_response(request_wire(
+            port, target, method, payload, include_content_length=include_length),
+            method.decode("ascii"))
+        assert status == (201 if method == b"POST" else 200)
+        assert header_values(headers, "X-Received-Content-Length") == [expected]
+        assert body == (payload if method == b"POST" else b"status\0ready\xff")
+    print("[PASS] GET length omission, explicit lengths and empty/binary POST framing")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="verify-iter4-") as temporary, ExitStack() as stack:
         directory = Path(temporary)
         shutil.copytree(ROOT / "public", directory / "public")
         fixture = Fixture(stack, directory)
         port = fixture.proxy_port
+        verify_protected_connection_options(fixture)
 
         status, headers, body = parse_response(request_wire(port, b"/api/hello"))
         assert status == 200 and body == b"Hello"
@@ -144,6 +267,7 @@ def main():
             observed += header_values(headers, "X-Backend-ID")
         assert observed == ["query-b", "query-a", "query-b", "query-a"]
         print("[PASS] #4 hello and #17 query A/B shared round-robin")
+        verify_request_length_headers(port)
 
         payload = bytes(range(256)) * 256
         status, headers, body = parse_response(request_wire(
@@ -195,24 +319,51 @@ def main():
                 client.sendall(wire)
                 client.shutdown(socket.SHUT_WR)
                 assert parse_response(receive_to_eof(client))[0] == expected
-        print("[PASS] local routes and existing request rejection policies")
+        with socket.create_connection(("127.0.0.1", port), timeout=4) as client:
+            client.sendall(b"GET /hello HTTP/1.0\r\nHost: original.example\r\n\r\n")
+            client.shutdown(socket.SHUT_WR)
+            assert parse_response(receive_to_eof(client))[0] == 505
+        print("[PASS] local routes, request policies and HTTP/1.1-only client requests")
 
         for mode, expected, expected_body in (
             ("chunked", 200, b"a\0bcd"), ("close", 200, b"close\0body"),
             ("informational", 200, b"status\0ready\xff"),
             ("no-content", 204, b""), ("not-modified", 304, b""),
-            ("http10", 502, None), ("bad-length", 502, None), ("reset", 502, None),
+            ("http10", 200, b"hello"), ("http10-close", 200, b"close\0body"),
+            ("http10-custom", 409, b"conflict"),
+            ("http10-no-content", 204, b""), ("http10-not-modified", 304, b""),
+            ("http10-informational", 502, None), ("http10-te", 502, None),
+            ("bad-length", 502, None), ("reset", 502, None),
             ("silent", 504, None),
         ):
             fixture.query_mode(mode)
             wire = request_wire(port, timeout=3 if mode == "silent" else 8)
             status, headers, body = parse_response(wire)
             assert status == expected, (mode, status, wire)
+            assert wire.startswith(b"HTTP/1.1 "), (mode, wire)
+            if mode == "http10-close":
+                assert header_values(headers, "Transfer-Encoding") == ["chunked"]
+                assert not header_values(headers, "Content-Length")
+            if mode == "http10":
+                assert header_values(headers, "Content-Length") == ["5"]
+                assert header_values(headers, "Content-Type") == ["text/plain"]
+            if mode == "http10-custom":
+                assert wire.startswith(b"HTTP/1.1 409 Legacy conflict\r\n")
+            if mode == "http10-no-content":
+                assert not header_values(headers, "Content-Type")
+                assert not header_values(headers, "Content-Length")
+            if mode == "http10-not-modified":
+                assert header_values(headers, "Content-Length") == ["123"]
             if expected_body is not None:
                 assert body == expected_body, (mode, body)
             if mode == "informational":
-                assert wire.startswith(b"HTTP/1.1 103 Early Hints\r\n")
-                assert b"Link: </a.css>\r\n" in wire
+                interim_header, final_wire = wire.split(b"\r\n\r\n", 1)
+                assert interim_header.startswith(b"HTTP/1.1 103 Early Hints\r\n")
+                assert b"Link: </a.css>\r\n" in interim_header
+                assert b"connection:" not in interim_header.lower()
+                assert b"Via: 1.1 jungle-proxy" in interim_header
+                assert final_wire.startswith(b"HTTP/1.1 200 ")
+                assert header_values(headers, "Connection") == ["close"]
             if mode == "chunked":
                 assert b"X-End: complete\r\n" in wire
             assert fixture.proxy.poll() is None
@@ -229,7 +380,7 @@ def main():
 
         time.sleep(0.05)  # Allow final close after the client observes write shutdown.
         baseline = fixture.fd_count()
-        for mode in ("truncate", "bad-chunk", "body-timeout", "body-total"):
+        for mode in ("truncate", "http10-truncate", "bad-chunk", "body-timeout", "body-total"):
             fixture.query_mode(mode)
             wire = request_wire(port, timeout=20)
             assert wire.startswith(b"HTTP/1.1 200 "), (mode, wire)

@@ -67,3 +67,139 @@
 제외: 부하·성능 측정, 동시 연결 1만 개 실험, 광범위한 퍼징/경합, 실제 운영 ACL 보증, 모든 메모리 할당·시스템 호출 실패 조합과 연결 타임아웃 네트워크 장애 주입. 연결 거절과 응답 시간 초과를 연결 완료 기한 검증으로 확대하지 않는다.
 
 make test / make verify를 사용자 승인 후 실행하고 통과·실패·skip·미검증으로 보고한다. 서버 E2E 바이너리는 일반 -O2이며 단위 sanitizer 검사와 구분한다.
+
+## P0-2 구현 전 검증 범위 (2026-11-25)
+
+- 단위: 세 프록시 경로에서 Connection이 Host/Content-Length/Transfer-Encoding을 지명하면 400. 대소문자, 앞뒤 SP/HTAB, 쉼표 목록, 여러 Connection 줄, 필드 이름의 접두/접미 유사 문자열을 확인한다.
+- 단위: 일반 X-Hop은 허용, 로컬 /hello의 보호 필드 지명은 기존 로컬 라우터로 전달한다. 기존 405/501 오류 우선순위를 유지한다.
+- E2E: Expect: 100-continue + Content-Length: 10을 헤더만 보내고 본문은 보내지 않는다. 첫 응답이 최종 400이며 100이 없어야 한다. 세 프록시 경로를 확인한다.
+- E2E: 테스트용 수동 TCP 리스닝 소켓(HTTP 응답을 제공하지 않는 접속 감지용)을 백엔드 주소로 설정해 보호 필드 요청 후 대기 연결이 0건임을 확인한다. Python은 검증 용도로만 사용하며 Python HTTP 백엔드를 추가하지 않는다.
+- E2E: 일반 Connection: X-Hop의 201과 제거, 로컬 /hello 200, 보호 필드 거절 뒤 정상 조회 A부터 시작 및 기존 회귀를 확인한다.
+- 기존 파서가 먼저 거절하는 잘못된 구문/길이·미지원 프레이밍의 오류 코드는 변경하지 않는다.
+- 사용자 핸드오프의 실행 지시에 따라 make clean → make all → make test (ASan/UBSan) → make verify를 실행한다. 부하·성능 실험, 실제 운영 권한/사용자 설정 변경, 광범위한 퍼징은 제외한다.
+- clean은 기존 명시적 산출물만 삭제하며 build/proxy.conf.example을 보존한다. 결과는 컴파일 / 통과 / 실패 / skip / 미검증으로 구분한다.
+
+## P0-2 보완 검증 완료 (2026-11-25)
+
+- 기존 Host 재작성·설정 파일 필수·HTTP/1.1 전용·기한·소유권·분배 정책 유지. C2/C14/C7은 현재 확정 계약과의 차이로 분리한다.
+- 새 Connection 보호 필드 조기 400만 구현했다. 본문 전용 처리·100 Continue·백엔드 접속 전 차단이며 일반 지명 헤더·로컬 경로·기존 오류 우선순위를 유지한다.
+- make clean 및 make all 성공. make test 단위 7개 ASan/UBSan 통과, make verify E2E 5개 통과. 최종 실패/skip 없음. 성능·외부 교차 스위트 전체는 미측정/미실행.
+- 새 E2E는 첫 응답 400·100 미송신·백엔드 접속 0건과 정상 회귀를 확인했다. 상세 결과: docs/iteration-4/Snoopykid/iteration-4-p02-verification-results.md.
+- 사용자 설정 예시는 clean·빌드 전후 해시 동일. main 머지·커밋·푸시는 하지 않았다. 이후 제안도 .md의 기존 결정과 실제 변경을 구분한다.
+
+## P1-4 구현 전 검증 범위 (2026-11-25)
+
+- 단위: HTTP/1.0 CL=5/CL=0 및 EOF 프레이밍 수용, 출력 상태 줄 HTTP/1.1, 원본 헤더 불변, 상태 코드·커스텀 문구·중복 전달 헤더 보존.
+- 단위: HTTP/1.0 204/304의 본문 없음/CL 메타데이터, 1xx·Transfer-Encoding·잘못된 버전·중복/오버플로우 CL 거절.
+- E2E: C 테스트 백엔드의 HTTP/1.0 고정 길이, 바이너리 EOF, 409 문구, 204/304, 본문 중단 및 1xx/TE 오류 모드. 고정 길이 조기 종료는 추가 HTTP 오류 없이 불완전 응답으로 판별한다.
+- E2E: 클라이언트 HTTP/1.0 요청은 여전히 미지원이며, 백엔드가 받는 요청은 기존 파서로 HTTP/1.1임을 검증한다. P0-2와 기존 Host·CLI·기한·프레이밍·FD 회귀를 유지한다.
+- 구현 후 컴파일·링크와 기능 검증을 구분한다. 핸드오프의 clean → all → test(ASan/UBSan) → verify 범위를 재실행한다. 실제 사용자 설정·정적 루트·권한 변경 및 성능 실험은 제외한다.
+
+## P1-4 HTTP/1.0 응답 수용 완료 (2026-11-25)
+
+- 사용자 승인으로 백엔드 HTTP/1.0 응답을 추가 수용하고 클라이언트 상태 줄은 HTTP/1.1로 구성한다. 상태 코드·문구·본문은 보존한다. 클라이언트와 백엔드 요청은 기존 HTTP/1.1이다.
+- 고정 길이/EOF·204/304·커스텀 문구·조기 종료 및 1.0의 잘못된 1xx/TE를 단위·C 백엔드 E2E로 검증했다.
+- make clean·make all 성공. ASan/UBSan 단위 7개와 E2E 5개 통과, 실패/skip 없음.
+- P0-2, Host·CLI·타임아웃·소유권은 유지한다. 다른 P1/P2 보완은 이번 작업에 포함하지 않았다.
+- 성능·부하·외부 교차 스위트 전체는 재실행하지 않았고 머지·커밋·푸시하지 않았다.
+- 상세 기록: docs/iteration-4/Snoopykid/iteration-4-http10-verification-results.md. 이전 HTTP/1.1 전용 및 C7 계약 차이 기록은 변경 이전 이력이다.
+
+## P1-6 구현 전 검증 범위 (2026-11-25)
+
+- 단위: 실제 socketpair에 요청 헤더·본문을 송신하고 재파싱한다. GET 길이 없음/명시적 0/3바이트, POST 길이 없음/명시적 0/3바이트를 비교한다. 길이 필드 중복 없음, 정확한 본문·Host/Via/Connection 보존도 확인한다.
+- 단위: 102/103/199 중간 응답은 close·CL·TE를 생성하지 않으며 Via·전달 헤더를 보존한다. 최종 응답 close는 유지한다.
+- E2E: C 백엔드가 실제 수신한 Content-Length의 존재·값을 응답의 테스트 식별 헤더로 확인한다. 정상 POST의 바이트·상태도 확인한다.
+- E2E: 103 블록에는 Connection 없음, Link·Via 보존, 뒤의 최종 200 블록에는 Connection: close, 본문 정상 완료를 확인한다.
+- 기존 P0-2·HTTP/1.0·프레이밍·정적/동적/CGI·기한·FD·시그널 회귀도 유지한다.
+- clean → all → test(ASan/UBSan) → verify를 실행하고 컴파일·기능 결과를 구분한다. 임시 fixture만 사용하며 부하·성능·운영 권한 변경은 제외한다.
+
+## P1-6 헤더 보완 완료 (2026-11-25)
+
+- 본문·원래 CL이 없는 GET의 CL: 0 합성을 생략하고 명시적 길이·POST 길이 정책은 유지했다.
+- 중간 1xx에는 close를 생성하지 않으며 Via·전달 헤더·최종 응답의 close는 유지했다.
+- clean·빌드 성공, ASan/UBSan 단위 7개 및 E2E 5개 통과. 최종 실패/skip 없음.
+- 실제 socketpair 송신과 C 백엔드 수신, 103/최종 200 분리 검사 및 기존 P0-2·HTTP/1.0·기한·FD 회귀를 확인했다.
+- 성능·외부 교차 스위트 전체는 재측정하지 않았고 머지·커밋·푸시하지 않았다. 다른 구조·메모리 보완은 포함하지 않았다.
+- 상세 결과: docs/iteration-4/Snoopykid/iteration-4-p16-verification-results.md. 이전 P1-4 보고서의 P1-6 미변경 설명은 당시 이력이다.
+
+## P1-7 구현 전 검증 범위 (2026-11-25)
+
+- E01~E14: Host 누락, 잘못된/소문자/빈 메서드, 1.0/2.0/비정상 버전, 요청 줄 잔여 데이터, 콜론 없는/공백/제어문자 헤더, HEAD 본문 없음, 길이 없는 POST의 추가 데이터 무시.
+- E15~E18: 헤더 EOF 400, 헤더/본문 idle 408(기존 호출별 5초), 빈 연결 뒤 생존.
+- E19~E21: 헤더 상한 안 긴 URI 404, 긴 hello query 200, 상한 초과 431.
+- E22~E26: 64KiB echo, 65537/10MiB 선언 조기 413, 413을 먼저 확인한 뒤 제한된 1MiB 추가 송신 시도·종료, 생존·FD 누적 방지. 원래 동시 폭주 중 응답 유실 가능성을 없앴다고 주장하지 않는다.
+- E27~E34: C 백엔드 64KiB 전달, 큰 선언 413, 0.3초 간격으로 진행하는 본문, 2초 지연 헤더 504, 무응답 504, 뒤의 정상 조회, 부분 헤더 504, 중간 본문 정지 시 추가 응답 없이 불완전 종료.
+- C2/C3/C7: 선택한 Host 재작성, 보호 필드 400·100 미송신·접속 0건, HTTP/1.0 수용·HTTP/1.1 출력.
+- C12: C 헤더 조각은 0.4초마다 보내며 전체가 1초를 넘도록 구성한다. 클라이언트의 2.5초 기능 제한 안에서 504를 받아야 하며 기한을 매 수신마다 갱신하는 회귀를 차단한다.
+- C13: C 백엔드가 요청 수신을 stderr로 알린 뒤 SIGTERM을 보낸다. 테스트 판정 제한 0.75초 내 정상 종료를 확인한다. 정확히 0초 종료나 모든 환경의 실시간 보장을 뜻하지 않는다.
+- C14: 포트 단독 실행 거절·불량 설정/인자 거절 및 설정 있는 정상 /hello 유지. 설정 기본값은 추가하지 않는다.
+- /proc이 없으면 FD 관측 부분은 skip으로 구분한다. 임시 파일·포트만 사용하고 기존 단위·E2E와 함께 실행한다.
+- clean → all → test(ASan/UBSan) → verify(기존 5개+edge)를 확인한다. standalone make verify-edge도 제공하되 동일 통과 범위를 불필요하게 반복 실행하지 않는다.
+## P1-7 엣지 검증 통합 완료 (2026-11-25)
+
+- make verify-edge를 추가하고 make verify에도 포함했다. 테스트용 C 백엔드를 재사용하며 제품 src/ 17개 파일은 이번 작업 전후 해시가 같다.
+- clean·컴파일/링크 성공, ASan/UBSan 단위 7개와 E2E 스크립트 6개 성공. 신규 E01~E34 및 C2/C3/C7/C12/C13/C14 대응 6개, 총 40개 통과·실패 0·skip 0.
+- Host 재작성·설정 필수 및 기존 기한을 유지해 계약 차이를 분리했다. 기능 기한만 검증했고 성능 측정은 하지 않았다.
+- 상세 범위·한계·로그: docs/iteration-4/Snoopykid/iteration-4-p17-verification-results.md. 머지·커밋·푸시는 수행하지 않았다.
+## P2-B 구현 경계 및 검증 기준 (2026-11-25)
+
+사용자가 파일 분리와 메모리 수명 개선을 함께 하는 B안을 선택했다.
+
+흐름: main → handle_client → proxy_prepare_response → connect_backend → forward_request_to_backend → prepare_backend_response_headers → send_prepared_response → read_backend_body_chunk → cleanup_backend_response.
+
+- proxy_transfer.c는 준비·실패 정리를 조율한다. proxy_io.c는 연결/기한/수신, proxy_headers.c는 요청 송신·응답 헤더 준비, proxy_body.c는 본문/청크/트레일러를 맡는다. 내부 구조와 모듈 간 함수는 proxy_internal.h로 제한한다.
+- 스트림에는 기존 16KiB 수신 배열을 유지한다. raw_header 8KiB와 재구성 client_header 16,640바이트는 헤더 준비의 지역 작업 공간으로 옮긴다. 지역 공간도 메모리를 사용하며, 향후 작업자 스택 예산 검토가 필요하다.
+- 최종/중간 응답을 포함한 송신 헤더는 완성 길이만 한 번 할당·복사한다. provider가 소유하고 첫 next 호출(송신 함수가 헤더 송신 완료 후 호출)에서 해제한다. 본문 없는 경우나 헤더 송신 실패로 next가 호출되지 않으면 cleanup이 해제한다. wire_header 참조는 첫 next/cleanup까지 유효하다.
+- 최종 chunked 응답의 Connection 필드만 원문 필드 줄로 별도 보존해 헤더 작업 공간 종료 후에도 기존 트레일러 거절 정책을 유지한다. 필드 없는 경우 할당하지 않는다. 응답 헤더 전체나 파싱 slice를 지역 공간 밖에 빌려 두지 않는다.
+- 트레일러는 기존 8KiB 상한의 지역 공간에서 검사 후, 비어 있지 않을 때 정확한 길이만 할당한다. 본문 전 할당 실패는 기존 500, 본문 처리 중 실패는 BODY_ERROR로 연결을 닫고 새 오류 응답/종료 청크를 붙이지 않는다.
+- 백엔드 FD는 준비 중 조율 함수, 성공 후 provider가 소유한다. client FD·요청 본문 소유권, Host 재작성·필수 설정·HTTP 버전·라우팅·타임아웃·상한은 유지한다. 이벤트 루프·동시성·새 콜백·성능 측정은 추가하지 않는다.
+
+검증 후보/통과 기준:
+- 기존 make test(ASan/UBSan), make verify 6개 스크립트/edge 40개 회귀 통과.
+- 헤더 작업 공간 종료 후 상태/본문/Connection 지명 정보 정상 사용; 다중 Connection·대소문자·지명 트레일러 거절 유지.
+- 헤더 송신 후 첫 next에서 출력 헤더 회수; 본문 없음/헤더 송신 실패의 cleanup 경로 회수.
+- 준비 단계 state/Connection/출력 헤더 및 본문 단계 트레일러 할당 실패 주입, FD 정리와 할당 수명 확인.
+- chunked·EOF·CL·1xx·204/304·HTTP/1.0·바이너리·불완전 응답 회귀, 오류 후 서버 생존/FD 확인.
+- 컴파일·링크와 실행 검증은 별도로 보고한다. 성능·RSS·1만 연결 실험은 제외한다.
+
+## P2-B 완료 (2026-11-25)
+
+- proxy_transfer 조율 + proxy_io/proxy_headers/proxy_body와 내부 헤더로 분리했다. raw_header·재구성 공간은 준비 단계 지역 공간, 송신 헤더·최종 chunked Connection 필드·실제 트레일러는 필요한 길이만 소유한다.
+- 첫 body next에서 송신 헤더를 회수하고, 그 전에 끝나거나 실패하면 cleanup이 회수한다. 트레일러 검사에 필요한 지명 정보는 복사해 지역 헤더를 참조하지 않는다. 기존 동작·기한·FD 책임은 유지한다.
+- clean·컴파일/링크 성공. ASan/UBSan 단위 8개와 E2E 스크립트 6개 통과, 엣지 40개 통과·실패 0·skip 0. 수명 테스트 추가 보강도 통과했다.
+- 제품에는 새 가변 전역/주입 훅을 추가하지 않았다. 메모리 수치는 코드상 공간 설명만 기록하며 CPU/RSS/처리량·성능은 측정하지 않았다. 동시성/라우팅 확장·머지·커밋·푸시는 포함하지 않았다.
+- 실제 흐름: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md. 상세 결과/한계/로그: docs/iteration-4/Snoopykid/iteration-4-p2-verification-results.md.
+## P2-9 A안 — 라우팅 판별 일원화 구현 전 기준 (2026-11-25)
+
+사용자가 A안을 선택했다. 로컬/프록시의 경로·메서드는 router.c의 단일 routes[]에서 판별한다. IPv6·가변 백엔드·정책 콜백·설정 변경·동시성은 추가하지 않는다.
+
+흐름: main → handle_client → http_parse_request → http_select_route → 프록시인 경우 proxy_validate_request → 본문 할당/100 Continue/수신 → 기존 로컬 handler 또는 proxy_select_backend/proxy_prepare_response → 송신/정리.
+
+- http_select_route는 선택 결과에 로컬 handler 또는 프록시 목적지 역할을 담는다. 라우팅 역할 enum은 router.h로 이동하고 proxy.h는 이를 사용한다. 기존 http_select_handler/proxy_match_request의 중복 판별 진입점은 제거한다. 테스트도 새 진입점을 사용한다.
+- proxy_validate_request는 기존 보호 Connection 필드 검사만 담당한다. 경로·메서드를 다시 검사하거나 I/O·할당·선택 순번 변경을 하지 않는다. server가 라우팅 성공한 프록시 요청에만 호출한다.
+- 기존 정확 일치/접두사와 최장 일치, GET/POST 외 501, 미등록 GET/POST 404, 등록 경로의 잘못된 GET/POST 405·Allow, 이후 보호 필드 400 순서를 유지한다. 보호 필드가 있어도 로컬 요청에 프록시 검사를 적용하지 않는다.
+- 헤더 파서의 오류/413/431은 라우터보다 먼저 결정한다. 본문·100·백엔드 접속보다 라우팅/보호 검사가 앞선다. A/B 순번은 본문 완료 후 기존 선택 지점에서만 바뀐다.
+
+검증 기준:
+- 전체 로컬 8개/프록시 3개 경로의 목적지·메서드·Allow, 정확 경로와 접두사 경계, /api/hello/·/api/submissions-extra·미등록 경로, 미지원 메서드 501을 표 기반 단위 테스트로 확인한다.
+- 실패 결과는 handler=NULL/LOCAL로 초기화하고 입력 target·headers 및 선택 순번은 변경하지 않는다. 검사만으로 handler를 실행하거나 메모리·FD를 확보하지 않는다.
+- 보호 헤더와 잘못된 메서드·미등록 경로 조합의 405/501/404 우선순위, 정상 로컬 경로 통과, 정상 프록시의 조기 400/100 미송신/백엔드 접속0 회귀를 확인한다.
+- clean·컴파일/링크와 make test(ASan/UBSan), make verify(6개 E2E/edge40)를 구분해 보고한다. 성능 측정·머지·커밋·푸시는 제외한다.
+
+## P2-9 A안 완료 — 라우팅 일원화 (2026-11-25)
+
+- 로컬 8개·프록시 3개 경로/메서드를 router.c 단일 routes[]와 http_select_route로 모았다. 결과는 request_route의 local_handler/proxy_route다.
+- handle_client에서 파서 → 라우터 → 프록시만 proxy_validate_request → 본문/100 → 기존 로컬 실행/백엔드 선택·중계 순서를 유지한다. 이전 중복 판별 함수는 제거했다.
+- 오류/Allow·보호 검사 범위·선택 순번·입력·소유권·기한·버퍼 수명을 유지했다. IPv6·가변 백엔드·정책 콜백·동시성은 추가하지 않았다.
+- clean·컴파일/링크 성공, ASan/UBSan 단위 8개와 E2E 스크립트 6개 통과. edge40 통과·실패 0·skip 0. 추가 오류 우선순위 11개는 기존 E2E 내부 검사로 포함했다.
+- 사용자 설정 해시 동일, 잔류 테스트 프로세스 없음. 성능/부하·외부 교차 전체·다른 OS 검증 및 머지·커밋·푸시는 하지 않았다.
+- 현재 흐름: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md. 상세 결과: docs/iteration-4/Snoopykid/iteration-4-routing-verification-results.md.
+
+## Iteration 4 승인 성능 재측정 완료 (2026-11-25)
+
+- f32e17d와 현재 소스를 격리 -O2 빌드하고 동일 C 백엔드1KiB·C 부하 생성기로 직접 기준선/S1~S6/S_MAX를 측정했다. 조건별5초 워밍업/3회, 총48회 모두 완료했다.
+- 검증된 성공응답 165,929건, 실패/5xx/워밍업 실패0건. 고정률 예정 건수 미달0, 측정 전후 FD증가0. 양쪽 S1 품질 상한 통과.
+- 포화 조회 중앙값 전 3920.8 → 후 3859.9req/s (-1.55%). 3회 변동 범위가 겹쳐 확정적 개선/저하를 단정하지 않는다.
+- 현재 WSL/공통 C 도구에서 보완 전체 묶음을 비교한 결과다. 외부 Linux/Go 보고서의4937req/s 유지 여부나 P2만의 인과 효과로 표현하지 않는다. CPU·RSS·직접접속 추가지연·A/B분산도 보고서/원시자료에 기록했다.
+- 사용자 설정 SHA256 동일, 현재 제품 src/Makefile이 측정 스냅샷과 동일하며 server/test_backend/load_client 잔류 프로세스가 없다. 서버 정책/최적화·추가 측정·머지·커밋·푸시는 하지 않았다.
+- 상세: docs/iteration-4/Snoopykid/iteration-4-performance-results.md. 보존할 원시 텍스트/CSV/지문: 같은 폴더 performance/. 실행 바이너리와 전체 로그는 build/performance/에만 보존한다.

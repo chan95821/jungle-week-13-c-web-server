@@ -23,16 +23,29 @@ struct router_response {
     const char *allow;
     struct body_provider body_provider;
     struct http_slice memory_body;
-    struct http_slice wire_header; /* Validated proxy header; provider owns storage. */
+    struct http_slice wire_header; /* Provider owns storage; valid until first next_func or cleanup. */
 };
 
 /* Prepare in caller-owned storage so the provider's state remains valid. */
 typedef void (*router_handler)(const struct http_request *request,
                                struct router_response *response);
 
-/* Select a route_handler_func before receiving the body; invoke it after body reception. */
-int http_select_handler(const struct http_request *request,
-                        router_handler *route_handler_func, const char **allow);
+/* Routing owns endpoint roles; proxy selection owns concrete backend addresses. */
+enum proxy_route {
+    PROXY_ROUTE_LOCAL,
+    PROXY_ROUTE_SUBMISSIONS,
+    PROXY_ROUTE_QUERY
+};
+
+struct request_route {
+    router_handler local_handler;
+    enum proxy_route proxy_route;
+};
+
+/* Match only; no handler execution, proxy validation, I/O or state mutation.
+ * Failure resets selected to LOCAL/NULL and sets Allow only for 405. */
+int http_select_route(const struct http_request *request,
+                      struct request_route *selected, const char **allow);
 
 /* Prepare a text/plain error response using http_reason() and optional Allow header. */
 void router_prepare_error(struct router_response *response, int status,

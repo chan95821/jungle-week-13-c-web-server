@@ -1,0 +1,17 @@
+{
+  "completed_trials": 48,
+  "successes": 165929,
+  "failures": 0,
+  "status_5xx": 0,
+  "warmup_failures": 0,
+  "baseline_smax_median_rps": 3920.764,
+  "current_smax_median_rps": 3859.852,
+  "smax_change_pct": -1.5535747624697671,
+  "ranges_overlap": true,
+  "s1_gate": {
+    "baseline": true,
+    "current": true
+  },
+  "offered_count_deficits": [],
+  "fd_changes": []
+}

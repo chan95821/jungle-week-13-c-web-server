@@ -1,0 +1,64 @@
+{
+  "baseline": {
+    "Makefile": "4d08cc912f675ce6dc240b04a4cd91b442b6c667044aba2b3cdd71f5dd924c54",
+    "cgi-src/order.c": "4d6cc1acc9be4729549bda6c879f74172d7372d59d805fa89da454ef601d4d4d",
+    "src/http.c": "cba9c3479a3042e8f82c441026f96aba49a2beef6b7e965b03fb0b02a283d65c",
+    "src/http.h": "fa560b3ad13d9bc65b1524cc88d3d30bf115c60759a5081dd8109a75a53491d9",
+    "src/main.c": "ffa60c44140038a271b94055b016d7d15c2d7aef8fa2cdf27a3f1e0e446e9100",
+    "src/proxy.c": "5266fb246d4c7ce5d8ce6fbaef6d385e3efbc29de92ab39fd82affcc596f3eab",
+    "src/proxy.h": "0f349dd2d4dac3cc41610f68be49f0c4afe01cd2debd2f9b92bd0b0ee1402f1f",
+    "src/proxy_transfer.c": "a1c4eb8843ae33665c72c9cf2058c0717c62a60672be9584f8439cea5a98b72d",
+    "src/router.c": "50d3f5ecb577c6f3fa7ba1b00cf2c51af97706ef0e4f3945ed92408439d77d69",
+    "src/router.h": "1b2da3a4b8872d592addb81747dd0ad2d6dd498cff716da8e2a884d870b1b721",
+    "src/server.c": "95652989475cbd194cc77d9635c3e19c1267bde12be2af77fd23740e6bd3d1c3",
+    "src/server.h": "c3affd604367813f2552c6fe204b8f56b3f026a4c448e8079ab648872c728abf",
+    "src/socket_io.c": "285f1457a6af79e2d792599853a085d3421ac6f33f2e0df748a1fbe51043eb0d",
+    "src/socket_io.h": "3ec28053d2e017812239ba5fc83cc9f83fd5db93d0bff80110b6dc6dbd6f7b6b",
+    "src/handlers/basic.c": "8177e3c3e3ada6de4ec1aab795616e1561fc96d91cf49a3c7d572edf89da65e3",
+    "src/handlers/cgi.c": "8c82e08c1cb6593cdfc7451bbc8731395073febbdcd99dcc0da3b9a1d98760ca",
+    "src/handlers/greet.c": "2b0b5494ab6f0f0421819d7543cd237bde347d5a026ae777571237045d9673a2",
+    "src/handlers/handlers.h": "3e04962808b1a5adc00a21c502109ebb03794ffb1cab7526daa228b53c37a80a",
+    "src/handlers/static.c": "dc828da794dc6ebdf9ea5bf22bc59ac160b7eb204154cbda1f05eb3ce8f833d3",
+    "binary_sha256": "d5894b649f96f75fc5b794b7e71f3168a40b13e17dd1c39ddcdbe89165e9a1b6"
+  },
+  "current": {
+    "Makefile": "413aa63228c38c2571d1f6149dc3f86aa88621c735e9312655d3cccee50beb9f",
+    "cgi-src/order.c": "4d6cc1acc9be4729549bda6c879f74172d7372d59d805fa89da454ef601d4d4d",
+    "src/http.c": "2a90ba376ecefb8eb317a707430b90006c37cdf3b43145bec25d69c18aa67ed1",
+    "src/http.h": "edfdb3dac83c2a51eb866e84bffe13f53ca2a47e2e8945250fef20b578a3730e",
+    "src/main.c": "71dcd3ff725eabf76b0e6ec137c1b6cf2c947023d72587adedb91e44523dba99",
+    "src/proxy.c": "9a13ebf8c1cc408748768e4aeafb9405e56807d72bd45c3f453d24030bb54a32",
+    "src/proxy.h": "893561ee3b72a176a13954867d97456197ac3cc0925673bc0afc235e3d7ea702",
+    "src/proxy_body.c": "0d4ea5780e24f2c573aaf6cc2482254cfada7d4f3caeba93ffe87c2b9b59077d",
+    "src/proxy_headers.c": "f5101720e48aec27fdf57ff2e6c6fe65fc3b97eaa75c16a7e0cdcfafcd835547",
+    "src/proxy_internal.h": "f51cd6d66d396e7b2a17c65e7d2286e7e4319da755ae3836591ad7d96f953fb3",
+    "src/proxy_io.c": "3d47cf51daa2cefce861b5b6c8bff6f33fd14b0b1e5226786552e0e8f2a37e63",
+    "src/proxy_transfer.c": "1f074e81b3fc9ddfb22f93447e46591626249af328cabc38e2c2cdff6cf63359",
+    "src/router.c": "ae8504fe43757265f964e99bb7c8145a12f0f55fab2f3706a1a43ec86efe7111",
+    "src/router.h": "dfc27636ea623ea7f8778ad0f3d69624aa0f14a9d07d1796c89c8b8a3fd8489c",
+    "src/server.c": "27e67981de4b2e2454dc1729b46c6437a7fe19e4d281fbfacb11849c7fb1069a",
+    "src/server.h": "ce4a6348465f729f0bb4dcf39e016527ab0de701e407c2fb2c163b2b07a08739",
+    "src/socket_io.c": "ef5a0eb3ded16e8f6ec151fe99b3daa6295345a58910a2719ba4efad62818512",
+    "src/socket_io.h": "b960631fbf04cc33ad53da7ce945574991e8c9fcc67bd50b64dca451a10f9e5c",
+    "src/handlers/basic.c": "8177e3c3e3ada6de4ec1aab795616e1561fc96d91cf49a3c7d572edf89da65e3",
+    "src/handlers/cgi.c": "8c82e08c1cb6593cdfc7451bbc8731395073febbdcd99dcc0da3b9a1d98760ca",
+    "src/handlers/greet.c": "2b0b5494ab6f0f0421819d7543cd237bde347d5a026ae777571237045d9673a2",
+    "src/handlers/handlers.h": "3e04962808b1a5adc00a21c502109ebb03794ffb1cab7526daa228b53c37a80a",
+    "src/handlers/static.c": "dc828da794dc6ebdf9ea5bf22bc59ac160b7eb204154cbda1f05eb3ce8f833d3",
+    "binary_sha256": "f32d3dc8dd27f83af5cf1f8bb798cb227e391a9e0c26229df79ba940a29159be"
+  },
+  "fixture": {
+    "source_sha256": "3af14888ae452a58ba082330a6d271ff549b5c70a9f29daf5baa96d7a11dc673",
+    "binary_sha256": "6404498078154c41d7da72623ee46fa99f3b3765f4a18f8ff1295e6c3f3cdad1"
+  },
+  "load_client": {
+    "source_sha256": "6b99f004eb4f9a05a0b6ef1ac8804180b4cee6e28fa4aa6e7734b0860af51da0",
+    "binary_sha256": "cbbf9ad93c1594df71172f4953543e28d71d98d86911a987d425bb426d5762a8"
+  },
+  "orchestration": {
+    "executed_script": "build/performance/benchmark_iter4.executed.py",
+    "executed_sha256": "9a2f3d148fbd499402ee65da59d2807a4fd103e2d97e2556d7800149f11a966d",
+    "current_script_sha256": "90b74b49d4108b2ebb51428b5b12d94a3206bfbe710802f420245ad076c24a0d",
+    "post_run_change": "prepare now exports baseline.tar automatically if absent; measured run logic unchanged"
+  }
+}

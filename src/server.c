@@ -25,8 +25,7 @@ void handle_client(int client_fd, const volatile sig_atomic_t *running,
     unsigned char request_header[REQ_HEADER_MAX_BYTES];
     unsigned char *request_body = NULL;
     struct http_request request = {0};
-    router_handler route_handler_func = NULL;
-    enum proxy_route proxy_route = PROXY_ROUTE_LOCAL;
+    struct request_route selected_route = {.proxy_route = PROXY_ROUTE_LOCAL};
     const char *allow = NULL;
     size_t received_bytes = 0, header_end_offset = 0, body_received_bytes = 0;
     bool head_request = false;
@@ -66,9 +65,9 @@ void handle_client(int client_fd, const volatile sig_atomic_t *running,
     status = http_parse_request(request_header, header_end_offset, &request);
     head_request = http_slice_equal(request.method, "HEAD");
     if (status) goto respond;
-    status = proxy_match_request(&request, &proxy_route, &allow);
-    if (!status && proxy_route == PROXY_ROUTE_LOCAL)
-        status = http_select_handler(&request, &route_handler_func, &allow);
+    status = http_select_route(&request, &selected_route, &allow);
+    if (!status && selected_route.proxy_route != PROXY_ROUTE_LOCAL)
+        status = proxy_validate_request(&request);
     if (status) goto respond;
 
     if (request.content_length) {
@@ -107,11 +106,12 @@ void handle_client(int client_fd, const volatile sig_atomic_t *running,
 respond:
     if (server_is_running(&client_response_io)) {
         struct router_response response;
-        if (status == 200 && proxy_route != PROXY_ROUTE_LOCAL) {
+        if (status == 200 && selected_route.proxy_route != PROXY_ROUTE_LOCAL) {
             const struct sockaddr_in *backend =
-                proxy_select_backend(proxy_config, selection, proxy_route);
+                proxy_select_backend(proxy_config, selection, selected_route.proxy_route);
             proxy_prepare_response(backend, &request, running, &response);
-        } else if (status == 200 && route_handler_func) route_handler_func(&request, &response);
+        } else if (status == 200 && selected_route.local_handler)
+            selected_route.local_handler(&request, &response);
         else router_prepare_error(&response, status, allow);
 
         int send_result = send_prepared_response(client_fd, &response, head_request, &client_response_io);

@@ -11,6 +11,16 @@
 #include <unistd.h>
 #include "../../src/router.h"
 
+/* Existing local response tests now exercise the unified production matcher. */
+static int select_local_handler(const struct http_request *request,
+                                 router_handler *handler, const char **allow) {
+    struct request_route selected;
+    int status = http_select_route(request, &selected, allow);
+    assert(status != 0 || selected.proxy_route == PROXY_ROUTE_LOCAL);
+    *handler = selected.local_handler;
+    return status;
+}
+
 static void valid_request(void) {
     unsigned char wire[] = "POST /echo?x=%20 HTTP/1.1\r\nhOsT:\tlocalhost:8080 \t\r\n"
                            "Content-Length: 5\r\nConnection: Keep-Alive, close\r\n"
@@ -31,7 +41,7 @@ static void valid_request(void) {
     assert(request.body.length == 0 && request.body.data == NULL);
     router_handler route_handler_func;
     const char *allow;
-    assert(http_select_handler(&request, &route_handler_func, &allow) == 0 && route_handler_func);
+    assert(select_local_handler(&request, &route_handler_func, &allow) == 0 && route_handler_func);
 }
 
 static void basic_statuses(void) {
@@ -97,7 +107,7 @@ static void routes(void) {
         assert(http_parse_request((const unsigned char *)wire, (size_t)length, &request) == 0);
         router_handler route_handler_func;
         const char *allow;
-        assert(http_select_handler(&request, &route_handler_func, &allow) == cases[i].status);
+        assert(select_local_handler(&request, &route_handler_func, &allow) == cases[i].status);
         assert((route_handler_func != NULL) == (cases[i].status == 0));
         if (cases[i].allow) assert(allow && strcmp(allow, cases[i].allow) == 0);
         else assert(allow == NULL);
@@ -113,7 +123,7 @@ static void response_selection(void) {
     router_handler route_handler_func;
     const char *allow;
     struct router_response response;
-    assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+    assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
     route_handler_func(&request, &response);
     assert(response.status == 200 && response.allow == NULL);
     assert(strcmp(response.content_type, "application/octet-stream") == 0);
@@ -124,7 +134,7 @@ static void response_selection(void) {
     assert(response.body == NULL && response.length == 0);
     request.method = (struct http_slice){(const unsigned char *)"GET", 3};
     request.path = (struct http_slice){(const unsigned char *)"/hello", 6};
-    assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+    assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
     route_handler_func(&request, &response);
     assert(strcmp(response.content_type, "text/plain") == 0);
     assert(response.length == 5 && memcmp(response.body, "Hello", 5) == 0);
@@ -163,7 +173,7 @@ static void static_route_selection(void) {
         struct http_request request = route_input(cases[i].method, cases[i].path);
         router_handler route_handler_func = NULL;
         const char *allow = NULL;
-        int status = http_select_handler(&request, &route_handler_func, &allow);
+        int status = select_local_handler(&request, &route_handler_func, &allow);
         assert(status == cases[i].status);
         if (cases[i].allow) assert(allow && strcmp(allow, cases[i].allow) == 0);
         else assert(allow == NULL);
@@ -214,7 +224,7 @@ static void static_file_responses(void) {
         struct http_request request = route_input("GET", target);
         router_handler route_handler_func = NULL;
         const char *allow = NULL;
-        assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+        assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
         struct router_response response;
         route_handler_func(&request, &response);
         assert(response.status == 200);
@@ -258,7 +268,7 @@ static void static_file_responses(void) {
         struct http_request request = route_input("GET", boundaries[i].target);
         router_handler route_handler_func = NULL;
         const char *allow = NULL;
-        assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+        assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
         struct router_response response;
         /* A regression that blocks while opening a FIFO must fail, not hang. */
         alarm(5);
@@ -294,13 +304,13 @@ static void static_file_responses(void) {
             router_handler route_handler_func = NULL;
             const char *allow = NULL;
             struct router_response response;
-            assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+            assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
             route_handler_func(&request, &response);
             assert(response.status == 200);
             if (response.body_provider.cleanup_func)
                 response.body_provider.cleanup_func(response.body_provider.state);
             request = route_input("GET", "/assets/dir.css");
-            assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+            assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
             route_handler_func(&request, &response);
             assert(response.status == 404);
             if (response.body_provider.cleanup_func)
@@ -341,7 +351,7 @@ static void file_provider_chunks_and_early_eof(void) {
     struct http_request request = route_input("GET", "/assets/chunks.js");
     router_handler route_handler_func = NULL;
     const char *allow = NULL;
-    assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+    assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
     struct router_response response;
     route_handler_func(&request, &response);
     assert(response.status == 200 && response.length == sizeof(bytes));
@@ -378,7 +388,7 @@ static void memory_provider_contract(void) {
     request.body = (struct http_slice){bytes, sizeof(bytes)};
     router_handler route_handler_func = NULL;
     const char *allow = NULL;
-    assert(http_select_handler(&request, &route_handler_func, &allow) == 0);
+    assert(select_local_handler(&request, &route_handler_func, &allow) == 0);
     struct router_response response;
     route_handler_func(&request, &response);
     assert(response.length == sizeof(bytes) && response.body_provider.next_func);
@@ -467,7 +477,7 @@ static void dynamic_route_selection(void) {
         struct http_request req = route_input(cases[i].method, cases[i].path);
         router_handler fn = NULL;
         const char *allow = NULL;
-        assert(http_select_handler(&req, &fn, &allow) == cases[i].status);
+        assert(select_local_handler(&req, &fn, &allow) == cases[i].status);
         assert((fn != NULL) == (cases[i].status == 0));
         if (cases[i].allow) assert(allow && strcmp(allow, cases[i].allow) == 0);
         else assert(allow == NULL);
@@ -522,7 +532,7 @@ static void dynamic_greet_responses(void) {
 
         router_handler fn = NULL;
         const char *allow = NULL;
-        assert(http_select_handler(&req, &fn, &allow) == 0);
+        assert(select_local_handler(&req, &fn, &allow) == 0);
 
         struct router_response resp;
         fn(&req, &resp);
@@ -549,7 +559,7 @@ static void dynamic_greet_responses(void) {
     struct http_request invalid_utf8 = route_query_input("GET", "/greet", "name=%FF%FE");
     router_handler fn = NULL;
     const char *allow = NULL;
-    assert(http_select_handler(&invalid_utf8, &fn, &allow) == 0);
+    assert(select_local_handler(&invalid_utf8, &fn, &allow) == 0);
     struct router_response resp;
     fn(&invalid_utf8, &resp);
     assert(resp.status == 200);
@@ -565,7 +575,7 @@ static void dynamic_greet_responses(void) {
     memset(long_query + 5, '\'', 900);
     long_query[sizeof(long_query) - 1] = '\0';
     struct http_request long_req = route_query_input("GET", "/greet", long_query);
-    assert(http_select_handler(&long_req, &fn, &allow) == 0);
+    assert(select_local_handler(&long_req, &fn, &allow) == 0);
     fn(&long_req, &resp);
     assert(resp.status == 200 && !resp.chunked);
     unsigned char *long_buf = malloc(resp.length + 1);
@@ -595,7 +605,7 @@ static void cgi_responses_and_boundaries(void) {
     struct http_request req = route_query_input("GET", "/cgi-bin/ok", NULL);
     router_handler fn = NULL;
     const char *allow = NULL;
-    assert(http_select_handler(&req, &fn, &allow) == 0);
+    assert(select_local_handler(&req, &fn, &allow) == 0);
     struct router_response resp;
     fn(&req, &resp);
     assert(resp.status == 404);
@@ -614,7 +624,7 @@ static void cgi_responses_and_boundaries(void) {
 
     /* Encoded path -> 400 */
     req = route_query_input("GET", "/cgi-bin/%6fk", NULL);
-    assert(http_select_handler(&req, &fn, &allow) == 0);
+    assert(select_local_handler(&req, &fn, &allow) == 0);
     fn(&req, &resp);
     assert(resp.status == 400);
     if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
@@ -627,7 +637,7 @@ static void cgi_responses_and_boundaries(void) {
     };
     for (size_t i = 0; i < sizeof(reject404) / sizeof(reject404[0]); ++i) {
         req = route_query_input("GET", reject404[i], NULL);
-        assert(http_select_handler(&req, &fn, &allow) == 0);
+        assert(select_local_handler(&req, &fn, &allow) == 0);
         fn(&req, &resp);
         assert(resp.status == 404);
         if (resp.body_provider.cleanup_func) resp.body_provider.cleanup_func(resp.body_provider.state);
@@ -642,7 +652,7 @@ static void cgi_responses_and_boundaries(void) {
                 0700);
 
     req = route_query_input("GET", "/cgi-bin/ok.sh", "a=1&b=%20");
-    assert(http_select_handler(&req, &fn, &allow) == 0);
+    assert(select_local_handler(&req, &fn, &allow) == 0);
     fn(&req, &resp);
     assert(resp.status == 200 && resp.chunked);
     assert(strcmp(resp.content_type, "text/plain") == 0);

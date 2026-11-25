@@ -60,34 +60,6 @@ cleanup:
     return 0;
 }
 
-int proxy_match_request(const struct http_request *request,
-                        enum proxy_route *route, const char **allow) {
-    *route = PROXY_ROUTE_LOCAL;
-    *allow = NULL;
-
-    enum proxy_route matched_route;
-    const char *required_method;
-    if (http_slice_equal(request->path, "/api/submissions")) {
-        matched_route = PROXY_ROUTE_SUBMISSIONS;
-        required_method = "POST";
-    } else if (http_slice_equal(request->path, "/api/submission-status") ||
-               http_slice_equal(request->path, "/api/hello")) {
-        matched_route = PROXY_ROUTE_QUERY;
-        required_method = "GET";
-    } else {
-        return 0;
-    }
-
-    if (!http_slice_equal(request->method, "GET") &&
-        !http_slice_equal(request->method, "POST")) return 501;
-    if (!http_slice_equal(request->method, required_method)) {
-        *allow = required_method;
-        return 405;
-    }
-    *route = matched_route;
-    return 0;
-}
-
 const struct sockaddr_in *proxy_select_backend(
     const struct proxy_config *config, struct proxy_selection_state *selection,
     enum proxy_route route) {
@@ -97,6 +69,37 @@ const struct sockaddr_in *proxy_select_backend(
     size_t selected_index = selection->next_query_backend % 2;
     selection->next_query_backend = (selected_index + 1) % 2;
     return &config->query_backends[selected_index];
+}
+
+/* Headers are already syntactically validated. Reject protected option tokens
+ * before the caller allocates/reads a body, sends 100, or selects a backend. */
+int proxy_validate_request(const struct http_request *request) {
+    struct http_slice headers = request->headers;
+    size_t offset = 0;
+    struct http_field field;
+    int next;
+    while ((next = http_next_field(headers, &offset, &field)) > 0) {
+        if (!http_field_name_equal(field.name, "connection")) continue;
+        size_t position = 0;
+        while (position < field.value.length) {
+            size_t start = position;
+            while (position < field.value.length && field.value.data[position] != ',')
+                ++position;
+            size_t end = position;
+            while (start < end &&
+                   (field.value.data[start] == ' ' || field.value.data[start] == '\t'))
+                ++start;
+            while (end > start &&
+                   (field.value.data[end - 1] == ' ' || field.value.data[end - 1] == '\t'))
+                --end;
+            struct http_slice option = {field.value.data + start, end - start};
+            if (http_field_name_equal(option, "host") ||
+                http_field_name_equal(option, "content-length") ||
+                http_field_name_equal(option, "transfer-encoding")) return 400;
+            if (position < field.value.length) ++position;
+        }
+    }
+    return next < 0 ? 400 : 0;
 }
 
 /* Parse one role/address pair. Blank lines and # comments have no effect. */
