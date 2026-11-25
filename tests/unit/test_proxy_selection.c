@@ -22,7 +22,7 @@ static void write_config(const char *path, const void *data, size_t length) {
 
 static void test_config(const char *path) {
     static const char valid[] =
-        "# test-only endpoints\n\nquery-b 127.0.0.1:8003\r\n"
+        "worker-policy rr\nquery-policy rr\n# test-only endpoints\n\nquery-b 127.0.0.1:8003\r\n"
         "submission 127.0.0.1:8001 # submit\nquery-a 127.0.0.1:8002";
     struct proxy_config config = {0};
     write_config(path, valid, sizeof(valid) - 1);
@@ -33,8 +33,20 @@ static void test_config(const char *path) {
     assert(ntohs(config.query_backends[1].sin_port) == 8003);
     assert(config.query_backends[0].sin_addr.s_addr == htonl(INADDR_LOOPBACK));
 
+    assert(config.worker_policy==DISTRIBUTE_RR && config.query_policy==DISTRIBUTE_RR);
+    const char *policies[]={"rr","least-outstanding","response-time","combined"};
+    for(size_t i=0;i<4;++i){
+        char contents[512];int length=snprintf(contents,sizeof(contents),
+            "worker-policy %s\nquery-policy %s\nsubmission 127.0.0.1:8001\nquery-a 127.0.0.1:8002\nquery-b 127.0.0.1:8003\n",policies[i],policies[3-i]);
+        assert(length>0 && (size_t)length<sizeof(contents));write_config(path,contents,(size_t)length);
+        assert(proxy_load_config(path,&config)==0 && (size_t)config.worker_policy==i && (size_t)config.query_policy==3-i);
+    }
+    write_config(path,valid,sizeof(valid)-1);assert(proxy_load_config(path,&config)==0);
     static const char *invalid[] = {
         "",
+        "submission 127.0.0.1:8001\nquery-a 127.0.0.1:8002\nquery-b 127.0.0.1:8003\n",
+        "worker-policy rr\nquery-policy auto\nsubmission 127.0.0.1:8001\nquery-a 127.0.0.1:8002\nquery-b 127.0.0.1:8003\n",
+        "worker-policy rr\nworker-policy combined\nquery-policy rr\nsubmission 127.0.0.1:8001\nquery-a 127.0.0.1:8002\nquery-b 127.0.0.1:8003\n",
         "submission 127.0.0.1:8001\nquery-a 127.0.0.1:8002",
         "unknown 127.0.0.1:8001",
         "submission 127.0.0.1:8001\nsubmission 127.0.0.1:8001",

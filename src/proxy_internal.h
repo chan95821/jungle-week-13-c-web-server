@@ -11,6 +11,9 @@ enum { PROXY_OUTPUT_HEADER_BYTES = 2 * REQ_HEADER_MAX_BYTES + 256 };
 /* Owns backend_fd and optional heap blocks; never borrows header workspace slices. */
 struct proxy_stream {
     int backend_fd;
+    struct distribution_timing *selection_timing;
+    struct timespec selection_started;
+    bool selection_clock_valid, selection_finished;
     const volatile sig_atomic_t *running;
     struct timespec header_deadline, body_deadline;
     bool body_started;
@@ -39,6 +42,8 @@ struct proxy_response_headers {
     struct http_slice fields, status_line;
 };
 
+int build_backend_request_headers(unsigned char *,size_t,size_t *,const struct sockaddr_in *,const struct http_request *);
+int retain_trailer_connection_fields(struct proxy_stream *,struct http_slice);
 int connect_backend(struct proxy_stream *, const struct sockaddr_in *);
 int forward_request_to_backend(struct proxy_stream *, const struct sockaddr_in *,
                                const struct http_request *);
@@ -48,6 +53,7 @@ int parse_backend_headers(struct proxy_stream *, struct proxy_response_headers *
 int build_client_response_headers(struct proxy_stream *, struct proxy_response_headers *);
 enum body_result read_backend_body_chunk(void *, struct http_slice *);
 void cleanup_backend_response(void *);
+void finish_proxy_timing(struct proxy_stream *,enum distribution_sample_result);
 int make_deadline(struct timespec *, int);
 bool deadline_reached(const struct timespec *);
 int fill_backend_buffer(struct proxy_stream *);

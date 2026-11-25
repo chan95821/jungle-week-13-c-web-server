@@ -2,6 +2,7 @@
 #define PROXY_H
 
 #include "http.h"
+#include "distribution_policy.h"
 #include "router.h"
 #include <signal.h>
 #include <netinet/in.h>
@@ -10,14 +11,17 @@
 struct proxy_config {
     struct sockaddr_in submission_backend;
     struct sockaddr_in query_backends[2];
+    enum distribution_policy worker_policy, query_policy;
 };
 
 /* Caller-owned state. Both query routes share one sequence, initially zero. */
 struct proxy_selection_state {
     size_t next_query_backend;
+    struct distribution_turn turn;
+    struct distribution_timing timing[2];
 };
 
-/* Read all three roles from a file. On failure, preserve config and set errno. */
+/* Read all three roles and both explicit policies from a file. On failure, preserve config and set errno. */
 int proxy_load_config(const char *path, struct proxy_config *config);
 
 /* Call only after successfully selecting a proxy route, before body/100/backend I/O.
@@ -42,6 +46,11 @@ enum {
 /* Prepare backend stream or a local 500/502/504 response. Takes no request ownership.
  * On success response's provider owns backend FD and all retained proxy buffers.
  * wire_header must be sent before the first next_func call, which releases it. */
+/* Sequential compatibility path: optional borrowed query timing state.
+ * Concurrent worker path uses shared reservation APIs instead. */
+void proxy_prepare_tracked_response(const struct sockaddr_in *backend,
+    const struct http_request *request,const volatile sig_atomic_t *running,
+    struct router_response *response,struct distribution_timing *timing);
 void proxy_prepare_response(const struct sockaddr_in *backend,
                             const struct http_request *request,
                             const volatile sig_atomic_t *running,

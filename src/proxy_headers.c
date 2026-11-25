@@ -9,22 +9,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int retain_trailer_connection_fields(struct proxy_stream *, struct http_slice);
+int retain_trailer_connection_fields(struct proxy_stream *, struct http_slice);
 static int validate_connection_value(struct http_slice);
 static int append_format(unsigned char *, size_t, size_t *, const char *, ...);
 static int parse_decimal_length(struct http_slice, size_t *);
 static bool slices_equal_case(struct http_slice, struct http_slice);
 
-int forward_request_to_backend(struct proxy_stream *stream,
+int build_backend_request_headers(unsigned char *header,size_t capacity,size_t *length,
                                       const struct sockaddr_in *backend,
                                       const struct http_request *request) {
-    unsigned char header[2 * REQ_HEADER_MAX_BYTES + 256];
     size_t used = 0;
     char address[INET_ADDRSTRLEN];
-    struct timespec deadline;
-    if (!inet_ntop(AF_INET, &backend->sin_addr, address, sizeof(address)) ||
-        make_deadline(&deadline, PROXY_REQUEST_SECONDS) < 0) return -1;
-    if (append_format(header, sizeof(header), &used, "%.*s %.*s HTTP/1.1\r\n",
+    if (!inet_ntop(AF_INET, &backend->sin_addr, address, sizeof(address))) return -1;
+    if (append_format(header, capacity, &used, "%.*s %.*s HTTP/1.1\r\n",
                       (int)request->method.length, request->method.data,
                       (int)request->target.length, request->target.data) < 0) return -1;
     size_t offset = 0;
@@ -36,31 +33,38 @@ int forward_request_to_backend(struct proxy_stream *stream,
             http_field_name_equal(field.name, "content-length") ||
             http_field_name_equal(field.name, "expect") ||
             http_field_name_equal(field.name, "trailer")) continue;
-        if (append_format(header, sizeof(header), &used, "%.*s: %.*s\r\n",
+        if (append_format(header, capacity, &used, "%.*s: %.*s\r\n",
                           (int)field.name.length, field.name.data,
                           (int)field.value.length, field.value.data) < 0) return -1;
     }
     if (next < 0) { errno = EPROTO; return -1; }
-    if (append_format(header, sizeof(header), &used, "Host: %s:%u\r\n",
+    if (append_format(header, capacity, &used, "Host: %s:%u\r\n",
                       address, (unsigned int)ntohs(backend->sin_port)) < 0) return -1;
     if (request->has_content_length || request->body.length != 0 ||
         http_slice_equal(request->method, "POST")) {
-        if (append_format(header, sizeof(header), &used, "Content-Length: %zu\r\n",
+        if (append_format(header, capacity, &used, "Content-Length: %zu\r\n",
                           request->body.length) < 0) return -1;
     }
-    if (append_format(header, sizeof(header), &used,
+    if (append_format(header, capacity, &used,
                       "Connection: close\r\nVia: 1.1 jungle-proxy\r\n\r\n") < 0) return -1;
-    struct io_context output = {stream->running, &deadline};
-    if (send_all_with_deadline(stream->backend_fd, header, used, &output) < 0 ||
-        send_all_with_deadline(stream->backend_fd, request->body.data,
-                               request->body.length, &output) < 0) {
-        if (socket_io_timed_out()) errno = ETIMEDOUT;
-        return -1;
-    }
-    if (deadline_reached(&deadline)) { errno = ETIMEDOUT; return -1; }
-    return 0;
+    *length=used;return 0;
 }
 
+int forward_request_to_backend(struct proxy_stream *stream,const struct sockaddr_in *backend,
+    const struct http_request *request) {
+    unsigned char header[PROXY_OUTPUT_HEADER_BYTES];size_t used;
+    struct timespec deadline;
+    if(make_deadline(&deadline,PROXY_REQUEST_SECONDS)<0 ||
+       build_backend_request_headers(header,sizeof(header),&used,backend,request)<0)return -1;
+    struct io_context output={stream->running,&deadline};
+    if(send_all_with_deadline(stream->backend_fd,header,used,&output)<0 ||
+       send_all_with_deadline(stream->backend_fd,request->body.data,request->body.length,&output)<0){
+        if(socket_io_timed_out())errno=ETIMEDOUT;
+        return -1;
+    }
+    if(deadline_reached(&deadline)){errno=ETIMEDOUT;return -1;}
+    return 0;
+}
 int prepare_backend_response_headers(struct proxy_stream *stream) {
     struct proxy_response_headers workspace = {0};
     struct proxy_response_headers *headers = &workspace;
@@ -190,7 +194,7 @@ invalid:
 
 /* Preserve every final Connection row, including repeated/mixed-case rows.
  * Their combined raw size cannot exceed the already validated header limit. */
-static int retain_trailer_connection_fields(struct proxy_stream *stream,
+int retain_trailer_connection_fields(struct proxy_stream *stream,
                                            struct http_slice fields) {
     if (stream->framing != BACKEND_CHUNKED) return 0;
     size_t offset = 0, total = 0;

@@ -1,6 +1,6 @@
 # jungle-week-13-c-web-server
 
-C/POSIX HTTP 서버와 순차 Reverse Proxy의 Iteration 4 개인 구현이다. 기준은 Issue #4·#17과 현재 팀의 정적·동적 응답 코드다. 동시성은 Iteration 5에서 구현한다.
+C/POSIX HTTP 서버와 Reverse Proxy다. 제품 main에서 부모 리스너 하나와 고정 작업자 프로세스 4개를 실행한다. 각 작업자는 LT epoll로 여러 클라이언트·백엔드·CGI 파이프를 관리하고, 정적 파일 작업은 제한된 보조 스레드에 맡긴다. 최소 통합 확인을 통과했으며 전체 회귀·광범위한 장애 검증은 다음 체크포인트에 남아 있다.
 
 ## 빌드와 실행
 
@@ -11,7 +11,7 @@ cd /mnt/c/Users/David/SW-AI-W02-03-TEMPLATE/jungle-week-13-c-web-server
 make all backend
 ~~~
 
-사용자가 옮긴 설정 파일은 build/proxy.conf.example이다. 파일 내용은 아래 형식이다. 빌드와 clean은 이 파일을 덮어쓰거나 삭제하지 않는다. build/는 Git에서 제외되므로 새 체크아웃에서는 설정 파일을 직접 준비해야 한다.
+기존 개인 설정 build/proxy.conf.example은 자동 변경하지 않는다. 현재는 worker-policy와 query-policy도 각각 필수다. 아래 RR 값은 실행 예시이며 최종 알고리즘 선정이 아니다. 저장소의 config/proxy.conf.example을 사용할 수 있다. build/는 Git에서 제외되며 빌드와 clean은 개인 설정을 덮어쓰거나 삭제하지 않는다.
 
 ~~~text
 submission 127.0.0.1:8001
@@ -19,7 +19,7 @@ query-a 127.0.0.1:8002
 query-b 127.0.0.1:8003
 ~~~
 
-빈 줄과 # 주석을 허용한다. 세 역할이 각각 한 번 필요하다. 호스트명·IPv6·누락·중복·잘못된 포트·추가 토큰은 거절한다. 주소는 시작 시 읽고 실행 중 재설정하지 않는다.
+빈 줄과 # 주석을 허용한다. 세 역할과 두 정책이 각각 한 번 필요하다. 정책 값은 rr, least-outstanding, response-time, combined다. 호스트명·IPv6·누락·중복·잘못된 포트·추가 토큰은 거절한다. 주소는 시작 시 읽고 실행 중 재설정하지 않는다.
 
 테스트 백엔드 세 개를 각각 별도 터미널에서 실행한다. 백엔드 바이너리는 테스트 코드에만 별도 진입점을 두고 기존 C 리스너·파서·송수신 코드를 재사용한다.
 
@@ -32,7 +32,7 @@ query-b 127.0.0.1:8003
 다른 터미널에서 프록시를 실행한다.
 
 ~~~sh
-./build/server 8080 build/proxy.conf.example
+./build/server 8080 config/proxy.conf.example
 ~~~
 
 프록시는 public 디렉터리가 있는 프로젝트 루트에서 실행한다. 시작 로그 없이 기다리며 종료는 Ctrl+C다. 클라이언트 접속 주소·포트는 하나다.
@@ -44,7 +44,9 @@ curl --noproxy '*' -i --data-binary 'hello' http://127.0.0.1:8080/api/submission
 curl --noproxy '*' -i http://127.0.0.1:8080/hello
 ~~~
 
-조회 응답의 X-Backend-ID가 query-a/query-b로 순환한다. 제출은 submission에서 201과 받은 바이트를 반환한다. 이 명령은 수동 사용 안내이며 실제 실행·검증 통과 결과가 아니다.
+위 RR 예시에서는 조회 응답의 X-Backend-ID가 query-a/query-b로 순환한다. 제출은 submission에서 201과 받은 바이트를 반환한다. 이 명령은 수동 사용 안내이며 실제 실행·검증 통과 결과가 아니다.
+
+시간 기반 정책은 EWMA 1/8과 매 32번째 RR 탐색을 사용하고, 결합 점수는 (진행 수+1)×대표 시간이다. worker-policy는 부모의 작업자 배정, query-policy는 작업자의 공유 상태 기반 조회 백엔드 선택에 적용된다. 각 작업자는 여러 연결을 관리하며, 최종 알고리즘은 아직 비교 후 선택할 사항이다. 세부 정책과 한계는 [정책 설계](docs/iteration-5/Snoopykid/iteration-5-policy-rules-design.md)를 참고한다.
 
 ## 라우팅과 HTTP 범위
 
@@ -114,7 +116,45 @@ make verify: Iteration 1·2·3 정적·3 동적 회귀와 Iteration 4 C 백엔�
 - src/main.c → src/server.c의 handle_client → src/router.c의 단일 경로/메서드 판별 → src/proxy.c의 보호 헤더 검사·설정·백엔드 분배 → src/proxy_transfer.c의 조율 → proxy_io.c의 연결/수신과 proxy_headers.c의 요청/응답 헤더 준비 → proxy_body.c의 본문 제공 → 기존 송신·정리.
 - 상세 리뷰: docs/iteration-4/Snoopykid/iteration-4-walkthrough.md.
 - 선택·검증 후보: docs/iteration-4/Snoopykid/iteration-4-requirements.md, iteration-4-tests.md.
-- 순차 처리이므로 조회 A/B 분배가 동시 처리 효과를 보장하지 않는다.
-- Iteration 5는 여러 작업자 + 작업자별 non-blocking 이벤트 루프 방향이다. 프로세스/스레드·수락/분배·상태 공유·역압력 정책은 사용자 선택 전이다. 현재 blocking provider를 그대로 이벤트 루프에서 호출하지 않는다.
+- 여러 작업자가 각자 여러 연결을 관리한다. 실제 처리 능력과 1만 연결 가능 여부는 아직 측정하지 않았다.
+- Iteration 5는 고정 프로세스 작업자 + 작업자별 LT epoll이다. 부모가 accept/FD 배정, 작업자가 공유 상태로 백엔드를 선택한다. 파일 provider는 helper, CGI 파이프는 이벤트 루프가 담당한다.
 - 동시 연결 1만 개는 검토 목표다. 성능 측정은 환경·조건·지표를 제시하고 별도 허락 후 진행한다.
 - 기존 정적 파일의 realpath/open 사이 경합 등 운영상 한계는 이번 프록시 추가로 해결했다고 주장하지 않는다.
+## Iteration 5 worker 네트워크 구성요소
+
+`make worker-io`는 실제 nonblocking worker reactor를 일반 옵션으로 컴파일한다. 현재 `./build/server`의 main은 부모/4작업자 실행 경로에 연결돼 있다. 정적 파일은 helper, CGI는 비차단 stdout/자식 회수 흐름을 사용한다.
+
+worker reactor는 기존 FD STREAM 수신, 여러 TCP 클라이언트·backend의 LT epoll, 16KiB relay와8KiB 재개점, 정확한 HTTP framing,10ms 공유 잠금 재시도, 선택잠금1초503, 기존 전체기한을 구현한다. 다음은 C backend와 fork worker를 사용하는 기능 검증 명령이며 부하·성능 비교가 아니다.
+
+```sh
+make test_worker_http_io test_worker_io_state
+./build/test_worker_http_io
+./build/test_worker_io_state
+```
+
+첫 시험은 실제 TCP·프로세스·역압력, 두 번째는 주입 시각의 기한 경계·이벤트 예산을 검증한다. 상세 함수 흐름과 미통합 범위는 [worker I/O 리뷰](docs/iteration-5/Snoopykid/iteration-5-worker-io-review.md)를 참고한다.
+
+### Iteration 5 통합 개발용 최소 확인
+
+`make smoke-process-http`는 부모 리스너 하나·실제 작업자 4개·C 테스트 백엔드로 정상 응답, 느린/빠른 요청의 동시 진행, 종료·자원 회수를 확인합니다. 일반 strict O2 빌드이며 전체 회귀·sanitizer·성능 검사를 대신하지 않습니다. 현재 제품 `build/server`의 main도 부모/4작업자 실행 경로를 사용합니다. 제품 진입점·CGI 최소 확인은 `make smoke-process-server`입니다.
+
+[부모 HTTP 통합 리뷰](docs/iteration-5/Snoopykid/iteration-5-parent-integration-review.md)
+
+파일 보조 스레드 최소 확인은 `make smoke-file-io`, 실제 부모/4작업자·정적 파일/프록시 통합 최소 확인은 `make smoke-process-http`입니다. 임시 fixture를 사용합니다. [파일 I/O 구현 리뷰](docs/iteration-5/Snoopykid/iteration-5-file-io-review.md)에 함수 흐름·소유권·종료 한계·실행 결과를 기록했습니다. CGI와 제품 main 연결은 완료했으며, 전체 회귀와 광범위한 장애 검증은 통합 체크포인트에 남아 있습니다.
+
+### 현재 실행 및 CGI 통합 확인
+
+프로젝트 루트의 Ubuntu/WSL 터미널에서 실행합니다.
+
+```sh
+make
+./build/server 8080 config/proxy.conf.example
+# 다른 터미널
+curl --noproxy '*' -i http://127.0.0.1:8080/hello
+curl --noproxy '*' -i 'http://127.0.0.1:8080/cgi-bin/order'
+# 서버 터미널에서 Ctrl+C로 종료
+```
+
+예제 설정은 worker/query RR을 명시한 실행 예이며 최종 알고리즘 결정이 아닙니다. 프록시 요청에는 예제에 지정한 C 백엔드를 별도로 실행해야 합니다. 개인 `build/proxy.conf.example`은 수정하지 않았습니다.
+
+`make smoke-process-server`는 임시 정적 파일과 C 백엔드/CGI를 사용해 제품 실행 경로의 정상·느린 CGI 중 다른 요청·취소·종료 정리를 확인합니다. 부하/성능 시험이 아닙니다. [CGI·main 통합 리뷰](docs/iteration-5/Snoopykid/iteration-5-cgi-main-review.md)를 참고하세요.

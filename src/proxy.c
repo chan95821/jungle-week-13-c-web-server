@@ -40,8 +40,8 @@ int proxy_load_config(const char *path, struct proxy_config *config) {
         if (errno == 0) errno = EIO;
         goto cleanup;
     }
-    if (seen_roles != 7U) {
-        fprintf(stderr, "%s: submission, query-a and query-b are required\n", path);
+    if (seen_roles != 31U) {
+        fprintf(stderr, "%s: submission, query-a, query-b, worker-policy and query-policy are required\n", path);
         errno = EINVAL;
         goto cleanup;
     }
@@ -66,8 +66,13 @@ const struct sockaddr_in *proxy_select_backend(
     if (route == PROXY_ROUTE_SUBMISSIONS) return &config->submission_backend;
     if (route != PROXY_ROUTE_QUERY) return NULL;
 
-    size_t selected_index = selection->next_query_backend % 2;
-    selection->next_query_backend = (selected_index + 1) % 2;
+    struct distribution_candidate candidates[2];
+    for(size_t i=0;i<2;++i)candidates[i]=(struct distribution_candidate){0,selection->timing[i],true};
+    struct distribution_turn turn=selection->turn,next;
+    turn.cursor=(uint32_t)(selection->next_query_backend%2);
+    size_t selected_index;
+    if(choose_distribution_candidate(config->query_policy,candidates,2,&turn,&selected_index,&next)<0)return NULL;
+    selection->turn=next;selection->next_query_backend=next.cursor;
     return &config->query_backends[selected_index];
 }
 
@@ -114,6 +119,13 @@ static int parse_config_line(char *line, struct proxy_config *config,
     char *endpoint = strtok_r(NULL, " \t\r\n", &cursor);
     if (!endpoint || strtok_r(NULL, " \t\r\n", &cursor)) return -1;
 
+    if(!strcmp(role,"worker-policy") || !strcmp(role,"query-policy")) {
+        unsigned int bit=!strcmp(role,"worker-policy")?8U:16U;
+        enum distribution_policy policy;
+        if((*seen_roles&bit) || parse_distribution_policy(endpoint,&policy)<0)return -1;
+        if(bit==8U)config->worker_policy=policy;else config->query_policy=policy;
+        *seen_roles|=bit;return 0;
+    }
     struct sockaddr_in *address;
     unsigned int role_bit;
     if (strcmp(role, "submission") == 0) {

@@ -76,7 +76,7 @@ static void prepare_file(const char *candidate, const char *allowed_directory,
 
     /* O_NONBLOCK prevents opening a FIFO from blocking before fstat rejects it.
      * The path may still change between realpath and open (TOCTOU). */
-    fd = open(resolved, O_RDONLY | O_NONBLOCK);
+    fd = open(resolved, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) { status = router_path_error_status(errno); goto fail; }
     if (fstat(fd, &info) < 0) goto fail;
     if (!S_ISREG(info.st_mode)) { status = 404; goto fail; }

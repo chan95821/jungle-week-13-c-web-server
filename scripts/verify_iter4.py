@@ -92,7 +92,7 @@ class Fixture:
         while self.proxy_port in self.ports.values():
             self.proxy_port = pick_free_port()
         self.config = directory / "proxy.conf"
-        self.config.write_text("".join(f"{role} 127.0.0.1:{port}\n"
+        self.config.write_text("worker-policy rr\nquery-policy rr\n" + "".join(f"{role} 127.0.0.1:{port}\n"
                                        for role, port in self.ports.items()), encoding="ascii")
         self.proxy = self.start([str(SERVER), str(self.proxy_port), str(self.config)],
                                 self.proxy_port)
@@ -207,7 +207,7 @@ def verify_protected_connection_options(fixture):
             trap.setblocking(False)
             traps.append(trap)
         config = fixture.directory / "protected-fields.conf"
-        config.write_text("".join(
+        config.write_text("worker-policy rr\nquery-policy rr\n" + "".join(
             f"{role} 127.0.0.1:{trap.getsockname()[1]}\n"
             for role, trap in zip(("submission", "query-a", "query-b"), traps)),
             encoding="ascii")

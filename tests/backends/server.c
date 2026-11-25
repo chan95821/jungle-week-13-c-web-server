@@ -87,6 +87,15 @@ static void handle_backend_request(int client, const char *identity, const char 
     }
     request.body = (struct http_slice){body, request.content_length};
     io.deadline = NULL;
+    if (!strcmp(mode, "large-body")) {
+        static const char header[] = "HTTP/1.1 200 OK\r\nContent-Length: 4194304\r\n\r\n";
+        unsigned char bytes[16384];
+        for (size_t i=0; i<sizeof(bytes); ++i) bytes[i]=(unsigned char)(i%251);
+        if (send_all_with_deadline(client,header,sizeof(header)-1,&io)<0) goto cleanup;
+        for (size_t sent=0; sent<4194304; sent+=sizeof(bytes))
+            if (send_all_with_deadline(client,bytes,sizeof(bytes),&io)<0) break;
+        goto cleanup;
+    }
     if (!strcmp(mode, "notify-silent")) {
         fputs("request-received\n", stderr);
         fflush(stderr);

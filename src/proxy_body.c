@@ -8,7 +8,16 @@
 
 static int read_trailers(struct proxy_stream *);
 
-enum body_result read_backend_body_chunk(void *state, struct http_slice *chunk) {
+static enum body_result read_backend_body_chunk_internal(void *state, struct http_slice *chunk);
+enum body_result read_backend_body_chunk(void *state,struct http_slice *chunk) {
+    enum body_result result=read_backend_body_chunk_internal(state,chunk);
+    struct proxy_stream *stream=state;
+    if(result==BODY_END || (result==BODY_DATA && stream->framing==BACKEND_LENGTH && !stream->remaining))
+        finish_proxy_timing(stream,DISTRIBUTION_COMPLETED);
+    else if(result==BODY_ERROR)finish_proxy_timing(stream,errno==ECANCELED?DISTRIBUTION_CANCELLED:DISTRIBUTION_FAILED);
+    return result;
+}
+static enum body_result read_backend_body_chunk_internal(void *state, struct http_slice *chunk) {
     struct proxy_stream *stream = state;
     /* send_prepared_response finishes wire_header before the first next call.
      * Zero-body/header-send-failure paths release it in provider cleanup. */
