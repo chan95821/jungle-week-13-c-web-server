@@ -8,6 +8,17 @@
 
 static int read_trailers(struct proxy_stream *);
 
+bool backend_trailer_is_allowed(const struct proxy_stream *stream, struct http_field field) {
+    return !proxy_header_is_hop_by_hop((struct http_slice){
+                stream->connection_fields, stream->connection_fields_length}, field.name) &&
+           !http_field_name_equal(field.name, "content-length") &&
+           !http_field_name_equal(field.name, "host") &&
+           !http_field_name_equal(field.name, "trailer") &&
+           !http_field_name_equal(field.name, "content-type") &&
+           !http_field_name_equal(field.name, "content-encoding") &&
+           !http_field_name_equal(field.name, "content-range");
+}
+
 enum body_result read_backend_body_chunk(void *state, struct http_slice *chunk) {
     struct proxy_stream *stream = state;
     /* send_prepared_response finishes wire_header before the first next call.
@@ -129,14 +140,7 @@ static int read_trailers(struct proxy_stream *stream) {
         size_t offset = 0;
         struct http_field field;
         if (http_next_field(fields, &offset, &field) != 1 ||
-            proxy_header_is_hop_by_hop((struct http_slice){
-                stream->connection_fields, stream->connection_fields_length}, field.name) ||
-            http_field_name_equal(field.name, "content-length") ||
-            http_field_name_equal(field.name, "host") ||
-            http_field_name_equal(field.name, "trailer") ||
-            http_field_name_equal(field.name, "content-type") ||
-            http_field_name_equal(field.name, "content-encoding") ||
-            http_field_name_equal(field.name, "content-range")) {
+            !backend_trailer_is_allowed(stream, field)) {
             errno = EPROTO; return -1;
         }
         if (proxy_append_bytes(trailer_workspace, sizeof(trailer_workspace),

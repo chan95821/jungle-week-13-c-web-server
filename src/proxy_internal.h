@@ -42,6 +42,12 @@ struct proxy_response_headers {
 int connect_backend(struct proxy_stream *, const struct sockaddr_in *);
 int forward_request_to_backend(struct proxy_stream *, const struct sockaddr_in *,
                                const struct http_request *);
+/* 순수 헤더 생성/검증을 blocking I/O에서 분리하여 이벤트 경로에서도 재사용한다. */
+int build_backend_request_header(const struct sockaddr_in *, const struct http_request *,
+                                  unsigned char *, size_t, size_t *);
+/* 완전한 CRLFCRLF 블록 하나: 0=interim, 1=final, -1=잘못된 응답. */
+int consume_backend_header_block(struct proxy_stream *, struct proxy_response_headers *);
+bool backend_trailer_is_allowed(const struct proxy_stream *, struct http_field);
 /* Copies only the completed wire header and final chunked Connection fields. */
 int prepare_backend_response_headers(struct proxy_stream *);
 int parse_backend_headers(struct proxy_stream *, struct proxy_response_headers *);
