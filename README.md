@@ -48,6 +48,7 @@ flowchart TD
 - **정책 설정**: `worker-policy`는 작업자 배정, `query-policy`는 조회 백엔드 선택. 시작 시 읽고 각각 독립 지정.
 - **선택 정책**: Round-Robin(`rr`), 미완료 수(`least-outstanding`), 응답 시간(`response-time`), 미완료 수·응답 시간 결합(`combined`).
 - **미완료 수 기준**: 작업자는 미종료 연결 수, 백엔드는 진행 요청 수.
+  
 ![선택 정책 config 파일](docs/assets/config.png)
 
 **④ HTTP 응답 생성**
