@@ -15,15 +15,15 @@ flowchart TD
     Accept --> Parse["HTTP 요청 파싱<br/>작업자: non-blocking I/O · epoll"]
     Parse --> Route{경로 · 메서드 기반 라우팅}
     Route -->|API 경로| Proxy["Reverse Proxy<br/>백엔드 선택 · 요청 중계"]
-    Proxy -->|제출| Submit[POST 백엔드 서버]
-    Proxy -->|조회: RR 등 선택 정책| Query[GET 백엔드 서버중에 하나]
+    Proxy -->|제출: RR 등 선택 정책| Submit[POST 백엔드 서버들]
+    Proxy -->|조회: RR 등 선택 정책| Query[GET 백엔드 서버들]
     Submit --> Relay[프록시의 백엔드 응답 수신 · 중계]
     Query --> Relay
     Relay --> Response[HTTP 응답 생성 · 전송]
     Response -->|HTTP 응답| Client
 ```
 
-- **그림 기준**: 기능별 요청 흐름. 부모·작업자와 내부 처리 기능은 하나의 웹 서버 구성.
+- **그림 기준**: Reverse Proxy 요청의 흐름을 중심으로 표시. 정적 파일·동적 요청의 서버 직접 처리 경로는 그림에서 생략했으며, 부모·작업자와 프록시 기능은 하나의 웹 서버 구성.
 
 **① 동시성 구조와 요청 처리 (TCP 소켓 서버 · HTTP 요청 파싱 · 동시 요청 처리)**
 
@@ -34,9 +34,9 @@ flowchart TD
 
 **② 정적 파일 서빙 · 동적 요청 처리**
 
-- **정적 파일 서빙**: 백엔드 전달 없이 웹 서버가 직접 제공. HTML 페이지와 CSS·JavaScript·이미지 파일 라우트.
-- **동적 요청 처리**: 입력에 따른 응답 생성 또는 **CGI 프로그램 실행** 라우트.
-- **파일 I/O**: 작업자별 **보조 스레드**에 위임.
+- **파일 I/O**: 정적 파일 등의 작업을 작업자별 **보조 스레드**에 위임.
+- **백엔드 전달 경로 (그림)**: 제출·조회 API는 Reverse Proxy가 백엔드에 전달. 조회·제출의 응답 생성은 백엔드의 동적 처리에 해당.
+- **구분 기준**: GET·POST는 HTTP 메서드이며 정적·동적 처리 또는 직접 처리·프록시 전달과는 별개의 구분.
 
 **③ Reverse Proxy · 경로 기반 라우팅 · 로드 밸런싱**
 
