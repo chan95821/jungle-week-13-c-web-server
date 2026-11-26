@@ -14,16 +14,12 @@ flowchart TD
     Client[클라이언트] -->|TCP 연결| Accept["TCP 소켓 서버<br/>부모: accept · 작업자 배정"]
     Accept --> Parse["HTTP 요청 파싱<br/>작업자: non-blocking I/O · epoll"]
     Parse --> Route{경로 · 메서드 기반 라우팅}
-    Route -->|로컬 경로| Static[정적 파일 서빙]
-    Route -->|로컬 경로| Dynamic[동적 요청 처리 · CGI]
     Route -->|API 경로| Proxy["Reverse Proxy<br/>백엔드 선택 · 요청 중계"]
     Proxy -->|제출| Submit[POST 백엔드 서버]
     Proxy -->|조회: RR 등 선택 정책| Query[GET 백엔드 서버중에 하나]
     Submit --> Relay[프록시의 백엔드 응답 수신 · 중계]
     Query --> Relay
     Relay --> Response[HTTP 응답 생성 · 전송]
-    Static --> Response
-    Dynamic --> Response
     Response -->|HTTP 응답| Client
 ```
 
