@@ -46,7 +46,7 @@ flowchart TD
 - **경로 기반 라우팅**: POST 제출 요청 처리 백엔드 또는 GET 조회 요청 처리 백엔드 중 한 곳으로 전달.
 - **중계**: 백엔드와 별도 TCP 연결, 백엔드 응답 수신 후 클라이언트에 전달.
 - **정책 설정**: `worker-policy`는 작업자 배정, `query-policy`는 조회 백엔드 선택. 시작 시 읽고 각각 독립 지정.
-- **네 선택 정책**: Round-Robin(`rr`), 미완료 수(`least-outstanding`), 응답 시간(`response-time`), 미완료 수·응답 시간 결합(`combined`).
+- **선택 정책**: Round-Robin(`rr`), 미완료 수(`least-outstanding`), 응답 시간(`response-time`), 미완료 수·응답 시간 결합(`combined`).
 - **미완료 수 기준**: 작업자는 미종료 연결 수, 백엔드는 진행 요청 수.
 
 **④ HTTP 응답 생성**
@@ -159,11 +159,3 @@ curl --noproxy '*' -i http://127.0.0.1:8080/api/submission-status
 - **사전 확인**: RR 설정·백엔드 기동. 이번 문서 편집에서 데모 재실행 없음.
 - **시간 조절**: 브라우저 시연 지연 시 API 시연 생략, 구조도로 설명.
 
-## 근거와 발표 시 주의점
-
-- [프로젝트 실행·라우팅 설명](README.md), [카페 화면](public/pages/cafe.html), [카페 동작](public/assets/cafe.js).
-- [프로세스 모델 통합 확인](docs/iteration-5/Snoopykid/iteration-5-cgi-main-review.md), [선택과 대안](docs/iteration-5/Snoopykid/iteration-5-design-decisions-collected.md).
-- [스레드 이벤트 루프 후보 검증](docs/iteration-5/jaeseong/iteration-5-results.md). 해당 브랜치의 환경·권한 skip을 확인할 것.
-- 비교 대상은 프로세스별 epoll, 스레드별 epoll, blocking 스레드 풀입니다. 소스 식별 정보는 원본 측정 보고서를 참고합니다.
-- Iteration 4의 성능 수치와 다른 브랜치의 개별 측정치를 세 모델의 공정한 비교 결과로 사용하지 않는다. 현재 작성자는 새 부하 테스트를 실행하지 않았다.
-- 조사 범위: 프로젝트의 접근 가능한 대화 목록과 구현 대화의 최근 비교 상태, 현재 main 문서·카페 파일, 로컬에 저장된 관련 브랜치 참조와 Iteration 5 결과 문서를 확인했다. 모든 브랜치의 모든 파일과 외부에만 있는 대화까지 전수 확인한 것은 아니다.
